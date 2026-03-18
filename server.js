@@ -1,6 +1,6 @@
-const express    = require('express');
-const puppeteer  = require('puppeteer');
-const cors       = require('cors');
+const express   = require('express');
+const puppeteer = require('puppeteer');
+const cors      = require('cors');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -13,10 +13,28 @@ app.get('/', (req, res) => {
   res.json({ status: 'ok', service: 'SolNergy PDF Service', version: '1.0.0' });
 });
 
-// ── PDF Generate ─────────────────────────────────────────────
+// ── POST: Wix backend çağırır, PDF binary döner ──────────────
 app.post('/generate-pdf', async (req, res) => {
-  const data = req.body;
+  await generateAndSend(req.body, res);
+});
 
+// ── GET: Email linki — query param olarak veri taşır ─────────
+// Kullanım: /pdf?data=BASE64_JSON
+app.get('/pdf', async (req, res) => {
+  try {
+    if (!req.query.data) {
+      return res.status(400).send('Veri eksik');
+    }
+    const data = JSON.parse(Buffer.from(req.query.data, 'base64').toString('utf-8'));
+    await generateAndSend(data, res);
+  } catch (err) {
+    console.error('GET /pdf hata:', err.message);
+    res.status(500).send('PDF oluşturulamadı: ' + err.message);
+  }
+});
+
+// ── Ortak PDF oluşturma fonksiyonu ───────────────────────────
+async function generateAndSend(data, res) {
   if (!data.firstName || !data.lastName || !data.totalIncl) {
     return res.status(400).json({ error: 'Pflichtfelder fehlen' });
   }
@@ -37,9 +55,10 @@ app.post('/generate-pdf', async (req, res) => {
     });
 
     const page = await browser.newPage();
-    const html = buildAngebotHtml(data);
-
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
+    await page.setContent(buildAngebotHtml(data), {
+      waitUntil: 'networkidle0',
+      timeout: 30000,
+    });
 
     const pdfBuffer = await page.pdf({
       format: 'A4',
@@ -55,15 +74,14 @@ app.post('/generate-pdf', async (req, res) => {
       'Content-Length':      pdfBuffer.length,
       'Cache-Control':       'no-cache',
     });
-
     res.send(pdfBuffer);
 
   } catch (err) {
     if (browser) await browser.close().catch(() => {});
-    console.error('PDF generation error:', err.message);
+    console.error('PDF hatası:', err.message);
     res.status(500).json({ error: 'PDF Generierung fehlgeschlagen', detail: err.message });
   }
-});
+}
 
 // ── HTML Builder ─────────────────────────────────────────────
 function buildAngebotHtml(d) {
@@ -108,87 +126,60 @@ function buildAngebotHtml(d) {
 <meta charset="UTF-8">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
-  * { margin:0; padding:0; box-sizing:border-box }
-  body { font-family:'DM Sans',Arial,sans-serif; color:#1a1a1a; background:#fff; font-size:13px; line-height:1.5 }
-  .page { padding:40px 48px }
-
-  /* HEADER */
-  .header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:28px; padding-bottom:18px; border-bottom:2.5px solid #E8A000 }
-  .logo { font-size:28px; font-weight:700; color:#E8A000; letter-spacing:-0.5px }
-  .logo span { color:#1a1a1a }
-  .logo-sub { font-size:9px; color:#aaa; letter-spacing:0.7px; text-transform:uppercase; margin-top:2px }
-  .header-right { text-align:right; font-size:11px; color:#666; line-height:1.8 }
-
-  /* RECIPIENT */
-  .recipient { display:inline-block; background:#F7F6F3; border-radius:8px; padding:14px 18px; margin-bottom:20px }
-  .recipient .name { font-size:14px; font-weight:600; margin-bottom:3px }
-  .recipient .addr { font-size:12px; color:#555; line-height:1.7 }
-
-  /* ANGEBOT NR */
-  .anr-badge { display:inline-block; background:#E8A000; color:#fff; font-size:10px; font-weight:700; padding:3px 10px; border-radius:4px; margin-bottom:6px; letter-spacing:0.3px }
-  .anr-title { font-size:20px; font-weight:700; color:#1a1a1a; margin-bottom:3px }
-  .anr-date { font-size:11px; color:#aaa; margin-bottom:18px }
-
-  /* INTRO */
-  .intro { font-size:13px; color:#444; line-height:1.75; margin-bottom:22px }
-
-  /* SECTION */
-  .sec { font-size:10px; font-weight:700; color:#E8A000; letter-spacing:0.9px; text-transform:uppercase; margin:20px 0 10px; padding-bottom:5px; border-bottom:1px solid #FFF3D6 }
-
-  /* TECHNIK GRID */
-  .tgrid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:18px }
-  .titem { background:#F7F6F3; border-radius:6px; padding:9px 12px }
-  .tlabel { font-size:9px; color:#aaa; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px }
-  .tval { font-size:12px; font-weight:600; color:#1a1a1a }
-
-  /* POS TABLE */
-  table.pos { width:100%; border-collapse:collapse; margin-bottom:18px }
-  table.pos th { background:#1a1a1a; color:#fff; padding:7px 10px; text-align:left; font-size:10px; font-weight:500; letter-spacing:0.3px }
-  table.pos td { padding:8px 10px; border-bottom:1px solid #f0ede6; vertical-align:top }
-  table.pos tr:nth-child(even) td { background:#FAFAF8 }
-  .pn { width:32px; font-weight:700; color:#E8A000; font-size:12px }
-  .pt { font-weight:600; color:#1a1a1a; margin-bottom:2px; font-size:12px }
-  .pd { font-size:11px; color:#777; line-height:1.5 }
-
-  /* ZAHLUNG */
-  table.zahl { width:100%; border-collapse:collapse; margin-bottom:18px; font-size:12px }
-  table.zahl td { padding:6px 0; border-bottom:1px solid #f0ede6 }
-  table.zahl td:last-child { text-align:right; font-weight:600 }
-
-  /* PRICE BOX */
-  .pricebox { background:#1a1a1a; border-radius:10px; padding:18px 22px; margin-bottom:18px }
-  .prow { display:flex; justify-content:space-between; padding:4px 0; font-size:12px; color:rgba(255,255,255,0.55) }
-  .prow.main { border-top:1px solid rgba(255,255,255,0.12); margin-top:7px; padding-top:11px; font-size:16px; color:#fff; font-weight:700 }
-  .prow.fo { color:#E8A000; font-weight:700; font-size:13px }
-  .prow.eg { color:#1D9E75; font-weight:700; font-size:13px }
-
-  /* SIGNATURE */
-  .sig-wrap { margin:22px 0 18px }
-  .sig-line { width:200px; border-top:1px solid #1a1a1a; margin-bottom:5px }
-  .sig-label { font-size:10px; color:#aaa }
-
-  /* FOOTER */
-  .footer { margin-top:24px; padding-top:14px; border-top:1px solid #e0ddd5; font-size:10px; color:#aaa; line-height:1.8 }
-  .disclaimer { margin-top:8px; padding-top:8px; border-top:1px solid #f0ede6; font-size:9.5px; color:#bbb; line-height:1.7 }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'DM Sans',Arial,sans-serif;color:#1a1a1a;background:#fff;font-size:13px;line-height:1.5}
+  .page{padding:40px 48px}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;padding-bottom:18px;border-bottom:2.5px solid #E8A000}
+  .logo{font-size:28px;font-weight:700;color:#E8A000;letter-spacing:-0.5px}
+  .logo span{color:#1a1a1a}
+  .logo-sub{font-size:9px;color:#aaa;letter-spacing:0.7px;text-transform:uppercase;margin-top:2px}
+  .header-right{text-align:right;font-size:11px;color:#666;line-height:1.8}
+  .recipient{display:inline-block;background:#F7F6F3;border-radius:8px;padding:14px 18px;margin-bottom:20px}
+  .recipient .name{font-size:14px;font-weight:600;margin-bottom:3px}
+  .recipient .addr{font-size:12px;color:#555;line-height:1.7}
+  .anr-badge{display:inline-block;background:#E8A000;color:#fff;font-size:10px;font-weight:700;padding:3px 10px;border-radius:4px;margin-bottom:6px}
+  .anr-title{font-size:20px;font-weight:700;margin-bottom:3px}
+  .anr-date{font-size:11px;color:#aaa;margin-bottom:18px}
+  .intro{font-size:13px;color:#444;line-height:1.75;margin-bottom:22px}
+  .sec{font-size:10px;font-weight:700;color:#E8A000;letter-spacing:0.9px;text-transform:uppercase;margin:20px 0 10px;padding-bottom:5px;border-bottom:1px solid #FFF3D6}
+  .tgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:18px}
+  .titem{background:#F7F6F3;border-radius:6px;padding:9px 12px}
+  .tlabel{font-size:9px;color:#aaa;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px}
+  .tval{font-size:12px;font-weight:600}
+  table.pos{width:100%;border-collapse:collapse;margin-bottom:18px}
+  table.pos th{background:#1a1a1a;color:#fff;padding:7px 10px;text-align:left;font-size:10px;font-weight:500}
+  table.pos td{padding:8px 10px;border-bottom:1px solid #f0ede6;vertical-align:top}
+  table.pos tr:nth-child(even) td{background:#FAFAF8}
+  .pn{width:32px;font-weight:700;color:#E8A000;font-size:12px}
+  .pt{font-weight:600;margin-bottom:2px;font-size:12px}
+  .pd{font-size:11px;color:#777;line-height:1.5}
+  table.zahl{width:100%;border-collapse:collapse;margin-bottom:18px;font-size:12px}
+  table.zahl td{padding:6px 0;border-bottom:1px solid #f0ede6}
+  table.zahl td:last-child{text-align:right;font-weight:600}
+  .pricebox{background:#1a1a1a;border-radius:10px;padding:18px 22px;margin-bottom:18px}
+  .prow{display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:rgba(255,255,255,0.55)}
+  .prow.main{border-top:1px solid rgba(255,255,255,0.12);margin-top:7px;padding-top:11px;font-size:16px;color:#fff;font-weight:700}
+  .prow.fo{color:#E8A000;font-weight:700;font-size:13px}
+  .prow.eg{color:#1D9E75;font-weight:700;font-size:13px}
+  .sig-line{width:200px;border-top:1px solid #1a1a1a;margin:28px 0 5px}
+  .sig-label{font-size:10px;color:#aaa}
+  .footer{margin-top:24px;padding-top:14px;border-top:1px solid #e0ddd5;font-size:10px;color:#aaa;line-height:1.8}
+  .disclaimer{margin-top:8px;padding-top:8px;border-top:1px solid #f0ede6;font-size:9.5px;color:#bbb;line-height:1.7}
 </style>
 </head>
 <body>
 <div class="page">
 
-  <!-- HEADER -->
   <div class="header">
     <div>
       <div class="logo">Sol<span>Nergy</span></div>
       <div class="logo-sub">Ihr Spezialist für Erneuerbare Energien</div>
     </div>
     <div class="header-right">
-      ${FIRMA_ADRESSE}<br>
-      Tel: ${FIRMA_TEL}<br>
-      ${FIRMA_MAIL} | ${FIRMA_WEB}
+      ${FIRMA_ADRESSE}<br>Tel: ${FIRMA_TEL}<br>${FIRMA_MAIL} | ${FIRMA_WEB}
     </div>
   </div>
 
-  <!-- RECIPIENT -->
   <div class="recipient">
     <div class="name">${d.salutation} ${d.firstName} ${d.lastName}${d.companyName ? ' / ' + d.companyName : ''}</div>
     <div class="addr">
@@ -198,20 +189,16 @@ function buildAngebotHtml(d) {
     </div>
   </div>
 
-  <!-- ANGEBOT NR -->
   <div class="anr-badge">Wärmepumpen Angebot</div>
   <div class="anr-title">Ihr persönliches Angebot ${d.angebotNr || ''}</div>
   <div class="anr-date">Erstellt am ${d.date || new Date().toLocaleDateString('de-DE')}</div>
 
-  <!-- INTRO -->
   <p class="intro">
     Sehr geehrte${d.salutation === 'Frau' ? '' : 'r'} ${d.salutation} ${d.lastName},<br><br>
     wir freuen uns, Ihnen heute das Angebot für Ihre Wärmepumpe zusenden zu können.
-    Gerne stehen wir Ihnen jederzeit mit Rat und Tat zur Seite und unterstützen Sie
-    in der zügigen Planung, Errichtung und Installation Ihrer Wärmepumpe.
+    Gerne stehen wir Ihnen jederzeit mit Rat und Tat zur Seite.
   </p>
 
-  <!-- TECHNIK -->
   <div class="sec">Technische Eckdaten</div>
   <div class="tgrid">
     <div class="titem"><div class="tlabel">Wohnfläche</div><div class="tval">${d.wohnflaeche || '—'} m²</div></div>
@@ -222,12 +209,11 @@ function buildAngebotHtml(d) {
     <div class="titem"><div class="tlabel">Heizkosten/Jahr</div><div class="tval">${d.kwhprice ? parseFloat(d.kwhprice).toLocaleString('de-DE', {minimumFractionDigits:2}) + ' €' : '—'}</div></div>
   </div>
 
-  <!-- LEISTUNG -->
   <div class="sec">Leistungsübersicht</div>
   <table class="pos">
     <thead><tr><th class="pn">POS</th><th>Bezeichnung</th></tr></thead>
     <tbody>
-      <tr><td class="pn">1</td><td><div class="pt">Wärmepumpen Außengerät</div><div class="pd">${d.moduleName || d.module || '—'} &bull; R290 (Propan) &bull; Vorlauftemperatur bis 70°C &bull; Förderfähig nach BEG</div></td></tr>
+      <tr><td class="pn">1</td><td><div class="pt">Wärmepumpen Außengerät</div><div class="pd">${d.moduleName || d.module || '—'} &bull; R290 &bull; Vorlauftemperatur bis 70°C &bull; Förderfähig nach BEG</div></td></tr>
       <tr><td class="pn">2</td><td><div class="pt">Wärmepumpen Inneneinheit</div><div class="pd">Kompakte Inneneinheit inkl. Umwälzpumpe, Umschaltventil und Sicherheitsarmaturen</div></td></tr>
       <tr><td class="pn">3</td><td><div class="pt">Hochleistungs-Pufferspeicher 75L</div><div class="pd">Max. 3 bar &bull; bis 110°C &bull; Vliesdämmung</div></td></tr>
       <tr><td class="pn">4</td><td><div class="pt">Hochleistungs-Hygienespeicher 300L</div><div class="pd">Max. 10 bar &bull; Max. 95°C &bull; El. Zusatzheizung 3kW &bull; Klasse A+++</div></td></tr>
@@ -247,47 +233,38 @@ function buildAngebotHtml(d) {
 
   ${agreementsHtml ? `
   <div class="sec">Zusatzvereinbarungen</div>
-  <table style="width:100%;border-collapse:collapse;margin-bottom:18px">
-    <tbody>${agreementsHtml}</tbody>
-  </table>` : ''}
+  <table style="width:100%;border-collapse:collapse;margin-bottom:18px"><tbody>${agreementsHtml}</tbody></table>` : ''}
 
-  <!-- ZAHLUNG -->
   <div class="sec">Zahlungsmodalitäten</div>
   <table class="zahl">
     <tr><td>1. Abschlag, 80%, bei Warenlieferung</td><td>${fmt(brutto * 0.8)} €</td></tr>
     <tr><td>2. Abschlag, 20%, bei Inbetriebnahme</td><td>${fmt(brutto * 0.2)} €</td></tr>
   </table>
 
-  <!-- PRICE -->
   <div class="pricebox">
     <div class="prow"><span>Gesamtsumme Netto</span><span>${fmt(netto)} €</span></div>
     <div class="prow"><span>19% MwSt.</span><span>${fmt(mwst)} €</span></div>
     <div class="prow main"><span>Gesamtsumme Brutto</span><span>${fmt(brutto)} €</span></div>
     ${foerder > 0 ? `
-    <div class="prow fo"><span>Ihre Fördersumme (${d.heatingcosts || ''}%)</span><span>${fmt(foerder)} €</span></div>
+    <div class="prow fo"><span>Fördersumme (${d.heatingcosts || ''}%)</span><span>${fmt(foerder)} €</span></div>
     <div class="prow eg"><span>Eigenanteil nach Förderung</span><span>${fmt(eigenanteil)} €</span></div>` : ''}
   </div>
 
-  <!-- SIGNATURE -->
   <p style="font-size:12px;color:#555;line-height:1.7;margin-bottom:18px">
     Hiermit nehme ich das Angebot vom ${d.date || new Date().toLocaleDateString('de-DE')} an
     und beauftrage die ${FIRMA_NAME} zur Durchführung meines Projektes.
   </p>
-  <div class="sig-wrap">
-    <div class="sig-line"></div>
-    <div class="sig-label">Ort, Datum, Unterschrift — ${d.salutation} ${d.firstName} ${d.lastName}</div>
-  </div>
+  <div class="sig-line"></div>
+  <div class="sig-label">Ort, Datum, Unterschrift — ${d.salutation} ${d.firstName} ${d.lastName}</div>
 
-  <!-- FOOTER -->
   <div class="footer">
     <strong>${FIRMA_NAME}</strong> &bull; ${FIRMA_ADRESSE} &bull; Tel: ${FIRMA_TEL} &bull; ${FIRMA_MAIL}<br>
-    Steuernummer: 143/181/60458 &bull; Handelsregister: Amtsgericht München HRB 279588 &bull; Geschäftsführer: Eren Yakisikli<br>
-    Münchner Bank &bull; IBAN: DE08 7019 0000 0003 1477 54 &bull; BIC: GENODEF1M01
+    Steuernummer: 143/181/60458 &bull; HRB 279588 Amtsgericht München &bull; Geschäftsführer: Eren Yakisikli<br>
+    IBAN: DE08 7019 0000 0003 1477 54 &bull; BIC: GENODEF1M01
   </div>
   <div class="disclaimer">
-    Sofern eine Teilzahlungsvereinbarung geschlossen wird, wird diese zum wesentlichen Bestandteil dieses Auftrages.
     Die staatlichen Fördermittel sind nicht Bestandteil dieses Angebots. Die Firma ${FIRMA_NAME} übernimmt keine Haftung dafür.
-    Mündliche Abmachungen oder Vereinbarungen sind nicht Bestandteil des Vertrags.
+    Mündliche Abmachungen sind nicht Bestandteil des Vertrags.
   </div>
 
 </div>
