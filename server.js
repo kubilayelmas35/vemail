@@ -148,12 +148,31 @@ async function getSatelliteUrl(address) {
 
 async function generateAndSend(html, name, lastName, res) {
   let browser;
+  let lastErr;
+
+  // ETXTBSY hatası için 3 deneme
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      browser = await puppeteer.launch({
+        executablePath: await chromium.executablePath(),
+        headless:       chromium.headless,
+        args:           chromium.args,
+      });
+      break; // başarılı, döngüden çık
+    } catch (e) {
+      lastErr = e;
+      console.warn(`Puppeteer launch attempt ${attempt} failed:`, e.message);
+      if (browser) { try { await browser.close(); } catch(_) {} browser = null; }
+      if (attempt < 3) await new Promise(r => setTimeout(r, 1500 * attempt));
+    }
+  }
+
+  if (!browser) {
+    console.error('Puppeteer tüm denemeler başarısız:', lastErr.message);
+    return res.status(500).json({ error: 'PDF Generierung fehlgeschlagen', detail: lastErr.message });
+  }
+
   try {
-    browser = await puppeteer.launch({
-      executablePath: await chromium.executablePath(),
-      headless:       chromium.headless,
-      args:           chromium.args,
-    });
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
     const pdfBuffer = await page.pdf({
@@ -192,7 +211,7 @@ function baseStyle() {
     body{font-family:Lato,Arial,sans-serif;color:#1a1a1a;background:#fdf3e7;font-size:13px;line-height:1.5}
     .page{padding:36px 44px;min-height:297mm;background:#fdf3e7}
     .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;padding-bottom:16px;border-bottom:3px solid #1a4a1a}
-    .logo-img{height:56px;width:auto;object-fit:contain}
+    .logo-img{height:72px;width:auto;object-fit:contain;background:#fdf3e7;border-radius:8px;padding:6px}
     .header-right{text-align:right;font-size:11px;color:#5a5a4a;line-height:1.8}
     .badge{display:inline-block;background:#1a4a1a;color:#fff;font-size:10px;font-weight:700;padding:3px 10px;border-radius:4px;margin-bottom:6px}
     .sec{font-size:10px;font-weight:700;color:#1a4a1a;letter-spacing:0.9px;text-transform:uppercase;margin:18px 0 8px;padding-bottom:5px;border-bottom:2px solid #f5b800}
@@ -289,7 +308,7 @@ function baseStyle() {
 function pageHeader(title) {
   const logoUrl = BASE_URL + '/images/logo.png';
   return `<div class="header">
-    <img src="${logoUrl}" class="logo-img" alt="${FIRMA.name}" onerror="this.style.display='none'">
+    <img src="${logoUrl}" class="logo-img" alt="${FIRMA.name}" onerror="this.style.display='none'" style="height:72px;width:auto;background:#fdf3e7;border-radius:8px;padding:6px;object-fit:contain">
     <div class="header-right">
       ${FIRMA.adresse}<br>Tel: ${FIRMA.tel}<br>${FIRMA.mail}
     </div>
@@ -405,7 +424,7 @@ function buildAngebot(d, satelliteUrl) {
 
   <!-- KAPAK SAYFASI -->
   <div class="cover">
-    <img src="${BASE_URL}/images/logo.png" style="height:70px;width:auto;margin-bottom:20px;display:block" onerror="this.style.display='none'">
+    <img src="${BASE_URL}/images/logo.png" style="height:80px;width:auto;margin-bottom:20px;display:block;background:#fdf3e7;border-radius:10px;padding:8px;object-fit:contain" onerror="this.style.display='none'">
     <h1>Ihr persönliches Angebot</h1>
     <div class="sub">${d.salutation} ${d.firstName} ${d.lastName} &bull; ${d.street} ${d.houseNumber}, ${d.zip} ${d.city}</div>
     <div class="nr">Angebot ${d.angebotNr||''} &nbsp;&bull;&nbsp; ${d.date||new Date().toLocaleDateString('de-DE')}</div>
