@@ -81,13 +81,17 @@ async function parseData(req) {
   } catch (e) { return null; }
 }
 
-// pdfmake'i bir kez yükle
-const pdfmake = require('pdfmake/build/pdfmake');
-const vfsFonts = require('pdfmake/build/vfs_fonts');
-// vfs_fonts modülü farklı versiyonlarda farklı export eder
-pdfmake.vfs = (vfsFonts.pdfMake && vfsFonts.pdfMake.vfs)
-  ? vfsFonts.pdfMake.vfs
-  : vfsFonts.vfs || vfsFonts;
+// pdfmake PdfPrinter — sistem fontlarını kullan (vfs_fonts gereksiz)
+const PdfPrinter = require('pdfmake');
+const FONTS = {
+  Helvetica: {
+    normal:      'Helvetica',
+    bold:        'Helvetica-Bold',
+    italics:     'Helvetica-Oblique',
+    bolditalics: 'Helvetica-BoldOblique',
+  },
+};
+const printer = new PdfPrinter(FONTS);
 
 // Logo base64 — startup'ta bir kez yükle
 let LOGO_BASE64 = null;
@@ -115,8 +119,15 @@ async function sendPdf(docDef, filename, res) {
       docDef = JSON.parse(defStr);
     }
 
-    const pdfDoc = pdfmake.createPdf(docDef);
-    pdfDoc.getBuffer((buffer) => {
+    // defaultStyle font ekle
+    if (!docDef.defaultStyle) docDef.defaultStyle = {};
+    docDef.defaultStyle.font = 'Helvetica';
+
+    const pdfDoc = printer.createPdfKitDocument(docDef);
+    const chunks = [];
+    pdfDoc.on('data', chunk => chunks.push(chunk));
+    pdfDoc.on('end', () => {
+      const buffer = Buffer.concat(chunks);
       res.set({
         'Content-Type':        'application/pdf',
         'Content-Disposition': `inline; filename="${filename}.pdf"`,
@@ -125,6 +136,11 @@ async function sendPdf(docDef, filename, res) {
       });
       res.send(buffer);
     });
+    pdfDoc.on('error', err => {
+      console.error('PDF stream hatası:', err.message);
+      if (!res.headersSent) res.status(500).json({ error: err.message });
+    });
+    pdfDoc.end();
   } catch (err) {
     console.error('PDF hatası:', err.message, err.stack);
     res.status(500).json({ error: err.message });
