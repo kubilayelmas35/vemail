@@ -20,7 +20,8 @@ app.post('/generate-pdf', async (req, res) => {
 app.get('/pdf', async (req, res) => {
   try {
     if (!req.query.data) return res.status(400).send('Veri eksik');
-    const data = JSON.parse(Buffer.from(req.query.data, 'base64').toString('utf-8'));
+    const b64 = req.query.data.replace(/-/g, '+').replace(/_/g, '/');
+    const data = JSON.parse(Buffer.from(b64, 'base64').toString('utf-8'));
     await generateAndSend(data, res);
   } catch (err) {
     console.error('GET /pdf hata:', err.message);
