@@ -1,8 +1,10 @@
 const express     = require('express');
 const cors        = require('cors');
 const path        = require('path');
+const https       = require('https');
 const axios       = require('axios');
-const htmlPdfNode = require('html-pdf-node');
+const puppeteer   = require('puppeteer-core');
+const chromium    = require('@sparticuz/chromium');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -11,9 +13,7 @@ app.use(cors());
 app.use(express.json({ limit: '4mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Chromium binary URL — GitHub releases'ten indirir
-const CHROMIUM_URL = 'https://github.com/Sparticuz/chromium/releases/download/v123.0.0/chromium-v123.0.0-pack.tar';
-
+// ── AYARLAR ──────────────────────────────────────────────────
 const BASE_URL        = process.env.RENDER_EXTERNAL_URL || 'https://vemail-jqp4.onrender.com';
 const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_KEY || '';
 
@@ -27,19 +27,6 @@ const FIRMA = {
   euid:    'DEB8537.HRB750663',
   gf:      'Denizer Yasar',
   gericht: 'Amtsgericht Ulm',
-};
-
-// Renk paleti
-const COL = {
-  green:      '#1a4a1a',
-  greenLight: '#2d7a2d',
-  yellow:     '#f5b800',
-  bg:         '#fdf3e7',
-  bgLight:    '#fef9f0',
-  border:     '#e8d5b0',
-  muted:      '#5a5a4a',
-  white:      '#ffffff',
-  black:      '#1a1a1a',
 };
 
 const BROSCHURE_URLS = {
@@ -60,27 +47,46 @@ const PRODUKT_IMAGES = {
 const LOGO_URL = 'https://raw.githubusercontent.com/kubilayelmas35/vemail/refs/heads/main/public/images/logo.png';
 
 // ── HEALTH ────────────────────────────────────────────────────
-app.get('/', (req, res) => res.json({ status: 'ok', service: 'Volksenergie Schwaben PDF Service v3', engine: 'pdfmake' }));
+app.get('/',     (req, res) => res.json({ status: 'ok', service: 'Volksenergie Schwaben PDF Service v4' }));
 app.get('/ping', (req, res) => res.json({ pong: true, time: new Date().toISOString() }));
 
-// ── BROSCHÜRE REDIRECT ────────────────────────────────────────
+// ── BROSCHÜRE ─────────────────────────────────────────────────
 app.get('/broschure', (req, res) => {
   const m = (req.query.module || '').toString();
   let url = BROSCHURE_URLS.viessmann_250;
-  if (m.includes('150'))                              url = BROSCHURE_URLS.viessmann_150;
+  if (m.includes('150'))                               url = BROSCHURE_URLS.viessmann_150;
   else if (m.includes('BUDERUS') || m.includes('WLW')) url = BROSCHURE_URLS.buderus;
   res.redirect(302, url);
 });
 app.get('/viessmann-broschure', (req, res) => res.redirect(302, BROSCHURE_URLS.viessmann_250));
 
 // ── PDF ENDPOINTS ─────────────────────────────────────────────
-app.get('/angebot',       async (req, res) => { const d = await parseData(req); if (!d) return res.status(400).send('Veri eksik'); const sat = await getSatelliteUrl(`${d.street||''} ${d.houseNumber||''}, ${d.zip||''} ${d.city||''}, Deutschland`); await generatePdf(buildAngebot(d, sat), `Angebot_${d.angebotNr||'ANG'}_${d.lastName||''}`, res); });
-app.get('/aufschiebende', async (req, res) => { const d = await parseData(req); if (!d) return res.status(400).send('Veri eksik'); await generatePdf(buildAufschiebende(d), `Aufschiebende_${d.lastName||''}`, res); });
-app.get('/vollmacht',     async (req, res) => { const d = await parseData(req); if (!d) return res.status(400).send('Veri eksik'); await generatePdf(buildVollmacht(d), `Vollmacht_${d.lastName||''}`, res); });
-
-app.post('/angebot',       async (req, res) => { const sat = await getSatelliteUrl(`${req.body.street||''} ${req.body.houseNumber||''}, ${req.body.zip||''} ${req.body.city||''}, Deutschland`); await generatePdf(buildAngebot(req.body, sat), `Angebot_${req.body.angebotNr||'ANG'}_${req.body.lastName||''}`, res); });
-app.post('/aufschiebende', async (req, res) => { await generatePdf(buildAufschiebende(req.body), `Aufschiebende_${req.body.lastName||''}`, res); });
-app.post('/vollmacht',     async (req, res) => { await generatePdf(buildVollmacht(req.body), `Vollmacht_${req.body.lastName||''}`, res); });
+app.get('/angebot', async (req, res) => {
+  const d = await parseData(req);
+  if (!d) return res.status(400).send('Veri eksik');
+  const sat = await getSatelliteUrl(`${d.street||''} ${d.houseNumber||''}, ${d.zip||''} ${d.city||''}, Deutschland`);
+  await generatePdf(buildAngebot(d, sat), `Angebot_${d.angebotNr||'ANG'}_${d.lastName||''}`, res);
+});
+app.get('/aufschiebende', async (req, res) => {
+  const d = await parseData(req);
+  if (!d) return res.status(400).send('Veri eksik');
+  await generatePdf(buildAufschiebende(d), `Aufschiebende_${d.lastName||''}`, res);
+});
+app.get('/vollmacht', async (req, res) => {
+  const d = await parseData(req);
+  if (!d) return res.status(400).send('Veri eksik');
+  await generatePdf(buildVollmacht(d), `Vollmacht_${d.lastName||''}`, res);
+});
+app.post('/angebot', async (req, res) => {
+  const sat = await getSatelliteUrl(`${req.body.street||''} ${req.body.houseNumber||''}, ${req.body.zip||''} ${req.body.city||''}, Deutschland`);
+  await generatePdf(buildAngebot(req.body, sat), `Angebot_${req.body.angebotNr||'ANG'}_${req.body.lastName||''}`, res);
+});
+app.post('/aufschiebende', async (req, res) => {
+  await generatePdf(buildAufschiebende(req.body), `Aufschiebende_${req.body.lastName||''}`, res);
+});
+app.post('/vollmacht', async (req, res) => {
+  await generatePdf(buildVollmacht(req.body), `Vollmacht_${req.body.lastName||''}`, res);
+});
 
 // ── HELPERS ───────────────────────────────────────────────────
 async function parseData(req) {
@@ -91,25 +97,48 @@ async function parseData(req) {
   } catch (e) { return null; }
 }
 
+// Browser instance — bir kez aç, cache'te tut
+let _browser = null;
+async function getBrowser() {
+  if (!_browser) {
+    _browser = await puppeteer.launch({
+      executablePath: await chromium.executablePath(),
+      headless:       chromium.headless,
+      args:           chromium.args,
+    });
+    console.log('Browser started');
+  }
+  return _browser;
+}
+
 async function generatePdf(html, filename, res) {
+  let page;
   try {
-    const file    = { content: html };
-    const options = { format: 'A4', printBackground: true, margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' } };
-    const pdfBuffer = await htmlPdfNode.generatePdf(file, options);
+    const browser = await getBrowser();
+    page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
+    const buf = await page.pdf({
+      format: 'A4', printBackground: true,
+      margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
+    });
+    await page.close();
     res.set({
       'Content-Type':        'application/pdf',
       'Content-Disposition': `inline; filename="${filename}.pdf"`,
-      'Content-Length':      pdfBuffer.length,
+      'Content-Length':      buf.length,
       'Cache-Control':       'no-cache',
     });
-    res.send(pdfBuffer);
+    res.send(buf);
   } catch (err) {
-    console.error('PDF hatası:', err.message);
+    if (page) try { await page.close(); } catch(_) {}
+    try { if (_browser) { await _browser.close(); _browser = null; } } catch(_) {}
+    console.error('PDF error:', err.message);
     res.status(500).json({ error: err.message });
   }
 }
 
-function fmt(n) { return (parseFloat(n)||0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+// Startup warmup
+getBrowser().catch(e => console.warn('Warmup failed:', e.message));
 
 async function getSatelliteUrl(address) {
   return new Promise((resolve) => {
@@ -136,74 +165,6 @@ async function getSatelliteUrl(address) {
   });
 }
 
-async function generateAndSend(html, name, lastName, res) {
-  let browser;
-  let lastErr;
-
-  // ETXTBSY hatası için 3 deneme
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      let execPath, launchArgs, headless;
-      if (IS_RAILWAY) {
-        // Railway'de sistem Chromium kullan
-        execPath   = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser';
-        headless   = 'new';
-        launchArgs = [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-          '--no-first-run',
-          '--no-zygote',
-          '--single-process',
-        ];
-      } else {
-        // Render / local — sparticuz
-        execPath   = await chromium.executablePath();
-        headless   = chromium.headless;
-        launchArgs = chromium.args;
-      }
-      browser = await puppeteer.launch({
-        executablePath: execPath,
-        headless:       headless,
-        args:           launchArgs,
-      });
-      break; // başarılı, döngüden çık
-    } catch (e) {
-      lastErr = e;
-      console.warn(`Puppeteer launch attempt ${attempt} failed:`, e.message);
-      if (browser) { try { await browser.close(); } catch(_) {} browser = null; }
-      if (attempt < 3) await new Promise(r => setTimeout(r, 1500 * attempt));
-    }
-  }
-
-  if (!browser) {
-    console.error('Puppeteer tüm denemeler başarısız:', lastErr.message);
-    return res.status(500).json({ error: 'PDF Generierung fehlgeschlagen', detail: lastErr.message });
-  }
-
-  try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
-    const pdfBuffer = await page.pdf({
-      format: 'A4', printBackground: true,
-      margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
-    });
-    await browser.close();
-    res.set({
-      'Content-Type':        'application/pdf',
-      'Content-Disposition': `inline; filename="${name}_${lastName}.pdf"`,
-      'Content-Length':      pdfBuffer.length,
-      'Cache-Control':       'no-cache',
-    });
-    res.send(pdfBuffer);
-  } catch (err) {
-    if (browser) await browser.close().catch(() => {});
-    res.status(500).json({ error: err.message });
-  }
-}
-
-// ── HELPER ────────────────────────────────────────────────────
 function fmt(n) { return (parseFloat(n)||0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
 function firmaFooter() {
@@ -262,56 +223,6 @@ function baseStyle() {
     .contact-box{background:#1a4a1a;border-radius:8px;padding:12px 18px;text-align:center;margin-bottom:20px;font-size:12px;color:#fff}
     .footer-bar{margin-top:20px;padding-top:12px;border-top:2px solid #1a4a1a;font-size:10px;color:#5a5a4a;line-height:1.8}
     .disclaimer{margin-top:8px;padding-top:8px;border-top:1px solid #e8d5b0;font-size:9.5px;color:#8a8a7a;line-height:1.7}
-  </style>`;
-}
-
-function firmaFooter() {
-  return `<div class="footer-bar">
-    <strong>${FIRMA.name}</strong> &bull; ${FIRMA.adresse} &bull; Tel: ${FIRMA.tel} &bull; ${FIRMA.mail}<br>
-    ${FIRMA.hrb} ${FIRMA.gericht} &bull; EUID: ${FIRMA.euid} &bull; Geschäftsführer: ${FIRMA.gf}
-  </div>`;
-}
-
-function baseStyle() {
-  return `<style>
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:Arial,sans-serif;color:#1a1a1a;background:#fff;font-size:13px;line-height:1.5}
-    .page{padding:40px 48px}
-    .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;padding-bottom:18px;border-bottom:2.5px solid #1a4a1a}
-    .logo{font-size:24px;font-weight:700;color:#1a4a1a}
-    .logo-sub{font-size:9px;color:#aaa;text-transform:uppercase;margin-top:2px;letter-spacing:0.5px}
-    .header-right{text-align:right;font-size:11px;color:#666;line-height:1.8}
-    .badge{display:inline-block;background:#1a4a1a;color:#fff;font-size:10px;font-weight:700;padding:3px 10px;border-radius:4px;margin-bottom:6px}
-    .sec{font-size:10px;font-weight:700;color:#1a4a1a;letter-spacing:0.9px;text-transform:uppercase;margin:20px 0 10px;padding-bottom:5px;border-bottom:1px solid #e8d5b0}
-    table.pos{width:100%;border-collapse:collapse;margin-bottom:18px}
-    table.pos th{background:#1a4a1a;color:#fff;padding:7px 10px;text-align:left;font-size:10px}
-    table.pos td{padding:8px 10px;border-bottom:1px solid #f0ede6;vertical-align:top}
-    table.pos tr:nth-child(even) td{background:#fef9f0}
-    .pn{width:32px;font-weight:700;color:#1a4a1a;font-size:12px}
-    .pt{font-weight:600;margin-bottom:2px;font-size:12px}
-    .pd{font-size:11px;color:#777;line-height:1.5}
-    .pricebox{background:#1a1a1a;border-radius:10px;padding:18px 22px;margin-bottom:18px}
-    .prow{display:flex;justify-content:space-between;padding:4px 0;font-size:12px;color:rgba(255,255,255,0.55)}
-    .prow.main{border-top:1px solid rgba(255,255,255,0.2);margin-top:7px;padding-top:11px;font-size:16px;color:#fff;font-weight:700}
-    .prow.fo{color:#f5b800;font-weight:700;font-size:13px}
-    .prow.eg{color:#1D9E75;font-weight:700;font-size:13px}
-    .sig-line{width:200px;border-top:1px solid #1a1a1a;margin:32px 0 5px}
-    .sig-label{font-size:10px;color:#aaa}
-    .disclaimer{margin-top:10px;padding-top:8px;border-top:1px solid #f0ede6;font-size:9.5px;color:#bbb;line-height:1.7}
-    .tgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:18px}
-    .titem{background:#fef9f0;border-radius:6px;padding:9px 12px;border:1px solid #e8d5b0}
-    .tlabel{font-size:9px;color:#aaa;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px}
-    .tval{font-size:12px;font-weight:600}
-    table.zahl{width:100%;border-collapse:collapse;margin-bottom:18px;font-size:12px}
-    table.zahl td{padding:6px 0;border-bottom:1px solid #f0ede6}
-    table.zahl td:last-child{text-align:right;font-weight:600}
-    .rbox{background:#fef9f0;border:1px solid #e8d5b0;border-radius:8px;padding:14px 18px;margin-bottom:20px;display:inline-block}
-    .rbox .nm{font-size:14px;font-weight:600;margin-bottom:3px}
-    .rbox .ad{font-size:12px;color:#555;line-height:1.7}
-    .highlight{background:#e8d5b0;border-left:4px solid #1a4a1a;padding:14px 18px;border-radius:0 6px 6px 0;margin-bottom:16px}
-    .condition-box{background:#fef9e7;border-left:4px solid #f5b800;padding:14px 18px;border-radius:0 6px 6px 0;margin-bottom:14px}
-    .condition-title{font-weight:700;color:#1a1a1a;margin-bottom:6px;font-size:13px}
-    .condition-text{font-size:12px;color:#444;line-height:1.7}
   </style>`;
 }
 
@@ -737,4 +648,4 @@ function buildVollmacht(d) {
 }
 
 
-app.listen(PORT, () => console.log(`Volksenergie Schwaben PDF Service v3 (pdfmake) running on port ${PORT}`));
+app.listen(PORT, () => console.log('Volksenergie Schwaben PDF Service v4 running on port ' + PORT));
