@@ -1,10 +1,8 @@
-const express  = require('express');
-const cors     = require('cors');
-const path     = require('path');
-const https    = require('https');
-const axios    = require('axios');
-const puppeteer = require('puppeteer-core');
-const chromium  = require('@sparticuz/chromium-min');
+const express     = require('express');
+const cors        = require('cors');
+const path        = require('path');
+const axios       = require('axios');
+const htmlPdfNode = require('html-pdf-node');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -15,33 +13,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Chromium binary URL — GitHub releases'ten indirir
 const CHROMIUM_URL = 'https://github.com/Sparticuz/chromium/releases/download/v123.0.0/chromium-v123.0.0-pack.tar';
-
-// Browser instance cache — her istek için yeniden başlatma
-let browserInstance = null;
-let browserLastUsed = Date.now();
-
-async function getBrowser() {
-  // 5 dakika kullanılmadıysa kapat
-  if (browserInstance && (Date.now() - browserLastUsed > 5 * 60 * 1000)) {
-    try { await browserInstance.close(); } catch(e) {}
-    browserInstance = null;
-  }
-
-  if (!browserInstance) {
-    const execPath = await chromium.executablePath(CHROMIUM_URL);
-    browserInstance = await puppeteer.launch({
-      executablePath: execPath,
-      headless:       chromium.headless,
-      args:           chromium.args,
-    });
-    console.log('Browser başlatıldı');
-  }
-  browserLastUsed = Date.now();
-  return browserInstance;
-}
-
-// Startup'ta browser'ı önceden ısıt
-getBrowser().catch(e => console.warn('Startup browser warm-up failed:', e.message));
 
 const BASE_URL        = process.env.RENDER_EXTERNAL_URL || 'https://vemail-jqp4.onrender.com';
 const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_KEY || '';
@@ -75,6 +46,15 @@ const BROSCHURE_URLS = {
   viessmann_250: BASE_URL + '/pdfs/broschure-vitocal-250a.pdf',
   viessmann_150: BASE_URL + '/pdfs/broschure-vitocal-150a.pdf',
   buderus:       BASE_URL + '/pdfs/broschure-buderus-wlw186i.pdf',
+};
+
+const PRODUKT_IMAGES = {
+  viessmann_250_aussen: BASE_URL + '/images/vitocal-250a.png',
+  viessmann_250_innen:  BASE_URL + '/images/vitocal-250a.png',
+  viessmann_150_aussen: BASE_URL + '/images/vitocal-150a.png',
+  viessmann_150_innen:  BASE_URL + '/images/vitocal-150a.png',
+  buderus_aussen:       BASE_URL + '/images/buderus-wlw186i.png',
+  buderus_innen:        BASE_URL + '/images/buderus-wlw186i.png',
 };
 
 const LOGO_URL = 'https://raw.githubusercontent.com/kubilayelmas35/vemail/refs/heads/main/public/images/logo.png';
@@ -112,17 +92,10 @@ async function parseData(req) {
 }
 
 async function generatePdf(html, filename, res) {
-  let page;
   try {
-    const browser = await getBrowser();
-    page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 25000 });
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
-    });
-    await page.close();
+    const file    = { content: html };
+    const options = { format: 'A4', printBackground: true, margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' } };
+    const pdfBuffer = await htmlPdfNode.generatePdf(file, options);
     res.set({
       'Content-Type':        'application/pdf',
       'Content-Disposition': `inline; filename="${filename}.pdf"`,
@@ -131,12 +104,6 @@ async function generatePdf(html, filename, res) {
     });
     res.send(pdfBuffer);
   } catch (err) {
-    if (page) try { await page.close(); } catch(e) {}
-    // Browser bozulduysa sıfırla
-    if (browserInstance) {
-      try { await browserInstance.close(); } catch(e) {}
-      browserInstance = null;
-    }
     console.error('PDF hatası:', err.message);
     res.status(500).json({ error: err.message });
   }
