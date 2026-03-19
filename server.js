@@ -34,8 +34,13 @@ app.get('/', (req, res) => {
   res.json({ status: 'ok', service: 'Volksenergie Schwaben PDF Service', version: '2.0.0' });
 });
 
+// ── KEEP ALIVE — Wix her 10 dakikada bir buraya ping atar ─────
+app.get('/ping', (req, res) => {
+  res.json({ pong: true, time: new Date().toISOString() });
+});
+
 // ── BROSCHÜRE REDIRECT — harici üretici URL'leri ─────────────
-const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_KEY || 'AIzaSyDzUsnQG-sKIO6wseQEbfrOOHRvwSyGUoM';
+const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_KEY || '';
 
 const BROSCHURE_URLS = {
   viessmann_250: 'https://www.viessmann.de/content/dam/vi-brands/DE/PDF/Produktinformationen/Waermepumpen/9444803_Broschure_VITOCAL_250-A.pdf',
