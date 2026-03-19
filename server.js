@@ -81,37 +81,40 @@ async function parseData(req) {
   } catch (e) { return null; }
 }
 
+// pdfmake'i bir kez yükle
+const pdfmake = require('pdfmake/build/pdfmake');
+const vfsFonts = require('pdfmake/build/vfs_fonts');
+// vfs_fonts modülü farklı versiyonlarda farklı export eder
+pdfmake.vfs = (vfsFonts.pdfMake && vfsFonts.pdfMake.vfs)
+  ? vfsFonts.pdfMake.vfs
+  : vfsFonts.vfs || vfsFonts;
+
+// Logo base64 — startup'ta bir kez yükle
+let LOGO_BASE64 = null;
+async function loadLogo() {
+  try {
+    const imgRes = await axios.get(LOGO_URL, { responseType: 'arraybuffer', timeout: 8000 });
+    LOGO_BASE64 = 'data:image/png;base64,' + Buffer.from(imgRes.data).toString('base64');
+    console.log('Logo yüklendi.');
+  } catch (e) { console.warn('Logo yüklenemedi:', e.message); }
+}
+loadLogo();
+
 async function sendPdf(docDef, filename, res) {
   try {
-    const PdfPrinter = require('pdfmake');
-    const fonts = {
-      Roboto: {
-        normal:      path.join(__dirname, 'node_modules/pdfmake/build/vfs_fonts.js') ? 'Roboto-Regular.ttf'      : undefined,
-        bold:        'Roboto-Medium.ttf',
-        italics:     'Roboto-Italic.ttf',
-        bolditalics: 'Roboto-MediumItalic.ttf',
-      }
-    };
-
-    // pdfmake'in built-in font'larını kullan
-    const pdfmake = require('pdfmake/build/pdfmake');
-    const vfs     = require('pdfmake/build/vfs_fonts');
-    pdfmake.vfs   = vfs.pdfMake.vfs;
-
-    // Logo'yu base64'e çevir
-    let logoBase64 = null;
-    try {
-      const imgRes = await axios.get(LOGO_URL, { responseType: 'arraybuffer', timeout: 5000 });
-      logoBase64 = 'data:image/png;base64,' + Buffer.from(imgRes.data).toString('base64');
-    } catch (e) { console.warn('Logo yüklenemedi:', e.message); }
-
-    if (logoBase64) {
-      // docDef içindeki logo placeholder'ları değiştir
-      const defStr = JSON.stringify(docDef).replace(/"LOGO_PLACEHOLDER"/g, `"${logoBase64}"`);
+    // Logo placeholder'ı doldur
+    if (LOGO_BASE64) {
+      const defStr = JSON.stringify(docDef).replace(/"LOGO_PLACEHOLDER"/g, JSON.stringify(LOGO_BASE64));
+      docDef = JSON.parse(defStr);
+    } else {
+      // Logo yoksa image alanlarını text ile değiştir
+      const defStr = JSON.stringify(docDef).replace(
+        /\{"image":"LOGO_PLACEHOLDER"[^}]*\}/g,
+        JSON.stringify({ text: 'Volksenergie Schwaben GmbH', fontSize: 14, bold: true, color: '#1a4a1a' })
+      );
       docDef = JSON.parse(defStr);
     }
 
-    const chunks = [];
     const pdfDoc = pdfmake.createPdf(docDef);
     pdfDoc.getBuffer((buffer) => {
       res.set({
@@ -123,7 +126,7 @@ async function sendPdf(docDef, filename, res) {
       res.send(buffer);
     });
   } catch (err) {
-    console.error('PDF hatası:', err.message);
+    console.error('PDF hatası:', err.message, err.stack);
     res.status(500).json({ error: err.message });
   }
 }
