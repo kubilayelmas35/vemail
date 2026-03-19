@@ -42,10 +42,21 @@ app.get('/ping', (req, res) => {
 // ── BROSCHÜRE REDIRECT — harici üretici URL'leri ─────────────
 const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_KEY || '';
 
+// ── ÜRÜN RESİMLERİ (local /public/images/) ───────────────────
+const BASE_URL = process.env.RENDER_EXTERNAL_URL || 'https://vemail-jqp4.onrender.com';
+const PRODUKT_IMAGES = {
+  viessmann_250_aussen: BASE_URL + '/images/vitocal-250a.png',
+  viessmann_250_innen:  BASE_URL + '/images/vitocal-250a.png',
+  viessmann_150_aussen: BASE_URL + '/images/vitocal-150a.png',
+  viessmann_150_innen:  BASE_URL + '/images/vitocal-150a.png',
+  buderus_aussen:       BASE_URL + '/images/buderus-wlw186i.png',
+  buderus_innen:        BASE_URL + '/images/buderus-wlw186i.png',
+};
+
 const BROSCHURE_URLS = {
-  viessmann_250: 'https://www.viessmann.de/content/dam/vi-brands/DE/PDF/Produktinformationen/Waermepumpen/9444803_Broschure_VITOCAL_250-A.pdf',
-  viessmann_150: 'https://www.viessmann.de/content/dam/vi-brands/DE/PDF/Produktinformationen/Waermepumpen/9444734_Broschure_VITOCAL_150-A.pdf',
-  buderus:       'https://www.buderus.de/resource/blob/79358/620febfca11099289342bc5fecd321e0/broschuere-logatherm-wlw186i-ar-data.pdf',
+  viessmann_250: BASE_URL + '/pdfs/broschure-vitocal-250a.pdf',
+  viessmann_150: BASE_URL + '/pdfs/broschure-vitocal-150a.pdf',
+  buderus:       BASE_URL + '/pdfs/broschure-buderus-wlw186i.pdf',
 };
 
 app.get('/broschure', (req, res) => {
@@ -249,6 +260,17 @@ function buildAngebot(d, satelliteUrl) {
     .map(v => `<tr><td style="padding:6px 12px;font-size:12px;border-bottom:1px solid #f0ede6">✓ ${agreementLabels[v]||v}</td></tr>`)
     .join('');
 
+  // Ürüne göre resim seç
+  let imgAussen = PRODUKT_IMAGES.viessmann_250_aussen;
+  let imgInnen  = PRODUKT_IMAGES.viessmann_250_innen;
+  if (isViessmann150) {
+    imgAussen = PRODUKT_IMAGES.viessmann_150_aussen;
+    imgInnen  = PRODUKT_IMAGES.viessmann_250_innen; // 150 innen benzer
+  } else if (isBuderus) {
+    imgAussen = PRODUKT_IMAGES.buderus_aussen;
+    imgInnen  = PRODUKT_IMAGES.buderus_innen;
+  }
+
   // Ürüne göre detaylı teknik bilgiler
   const isViessmann250 = (d.moduleName||d.module||'').toString().includes('250');
   const isViessmann150 = (d.moduleName||d.module||'').toString().includes('150');
@@ -389,14 +411,21 @@ function buildAngebot(d, satelliteUrl) {
   <!-- POS 1: AUSSENGERÄT -->
   <div class="pos-header">POS 1 — Wärmepumpen Außengerät</div>
   <div class="pos-row">
-    <div style="font-size:13px;font-weight:700;color:#1a5276;margin-bottom:6px">${moduleName}</div>
-    ${produktDetails}
+    <div style="display:flex;gap:16px;align-items:flex-start">
+      <img src="${imgAussen}" alt="${moduleName}" style="width:140px;height:140px;object-fit:contain;flex-shrink:0;border-radius:6px;border:1px solid #d6eaf8;padding:6px;background:#f8fbfd" onerror="this.style.display='none'">
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:700;color:#1a5276;margin-bottom:6px">${moduleName}</div>
+        ${produktDetails}
+      </div>
+    </div>
   </div>
 
   <!-- POS 2: INNENEINHEIT -->
   <div class="pos-header">POS 2 — Wärmepumpen Inneneinheit</div>
   <div class="pos-row">
-    <div style="font-size:12px;color:#444;line-height:1.7">
+    <div style="display:flex;gap:16px;align-items:flex-start">
+      <img src="${imgInnen}" alt="Inneneinheit" style="width:140px;height:140px;object-fit:contain;flex-shrink:0;border-radius:6px;border:1px solid #d6eaf8;padding:6px;background:#f8fbfd" onerror="this.style.display='none'">
+      <div style="flex:1;font-size:12px;color:#444;line-height:1.7">
       Kompakte Inneneinheit für effizientes Heizen und Kühlen. Die Inneneinheit übernimmt die
       komplette hydraulische Einbindung der Wärmepumpe und enthält alle wichtigen Komponenten
       wie Umwälzpumpe, Umschaltventil und Sicherheitsarmaturen. Dank Vorlauftemperaturen bis
