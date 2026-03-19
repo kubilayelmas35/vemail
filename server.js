@@ -1,4 +1,5 @@
 const express  = require('express');
+const https    = require('https');
 const puppeteer = require('puppeteer-core');
 const chromium  = require('@sparticuz/chromium');
 const cors      = require('cors');
@@ -33,24 +34,50 @@ app.get('/', (req, res) => {
   res.json({ status: 'ok', service: 'Volksenergie Schwaben PDF Service', version: '2.0.0' });
 });
 
-// ── VIESSMANN BROSCHÜRE (statik dosya) ───────────────────────
+// ── BROSCHÜRE REDIRECT — harici üretici URL'leri ─────────────
+const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_KEY || 'AIzaSyDzUsnQG-sKIO6wseQEbfrOOHRvwSyGUoM';
+
+const BROSCHURE_URLS = {
+  viessmann_250: 'https://www.viessmann.de/content/dam/vi-brands/DE/PDF/Produktinformationen/Waermepumpen/9444803_Broschure_VITOCAL_250-A.pdf',
+  viessmann_150: 'https://www.viessmann.de/content/dam/vi-brands/DE/PDF/Produktinformationen/Waermepumpen/9444734_Broschure_VITOCAL_150-A.pdf',
+  buderus:       'https://www.buderus.de/resource/blob/79358/620febfca11099289342bc5fecd321e0/broschuere-logatherm-wlw186i-ar-data.pdf',
+};
+
+app.get('/broschure', (req, res) => {
+  const modul = (req.query.module || '').toString();
+  let url = BROSCHURE_URLS.viessmann_250;
+  if (modul.includes('150')) url = BROSCHURE_URLS.viessmann_150;
+  else if (modul.includes('BUDERUS') || modul.includes('WLW') || modul.includes('2194') || modul.includes('2195') || modul.includes('2184') || modul.includes('2182')) url = BROSCHURE_URLS.buderus;
+  res.redirect(302, url);
+});
+
+// Eski endpoint — geriye dönük uyumluluk
 app.get('/viessmann-broschure', (req, res) => {
-  const file = path.join(__dirname, 'public', 'viessmann-broschure.pdf');
-  if (fs.existsSync(file)) {
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename="Viessmann-Vitocal-250A-Broschure.pdf"');
-    res.sendFile(file);
-  } else {
-    res.status(404).json({ error: 'Broschüre nicht gefunden. Bitte hochladen.' });
-  }
+  res.redirect(302, BROSCHURE_URLS.viessmann_250);
 });
 
 // ── PDF ENDPOINTS ─────────────────────────────────────────────
-app.post('/angebot',               async (req, res) => await generateAndSend(buildAngebot(req.body),            'Angebot',               req.body.lastName, res));
+app.post('/angebot', async (req, res) => {
+  const d = req.body;
+  const address = `${d.street||''} ${d.houseNumber||''}, ${d.zip||''} ${d.city||''}, Deutschland`;
+  const satelliteUrl = await getSatelliteUrl(address);
+  await generateAndSend(buildAngebot(d, satelliteUrl), 'Angebot', d.lastName, res);
+});
 app.post('/aufschiebende',         async (req, res) => await generateAndSend(buildAufschiebende(req.body),      'Aufschiebende-Bed',     req.body.lastName, res));
 app.post('/vollmacht',             async (req, res) => await generateAndSend(buildVollmacht(req.body),          'Vollmacht',             req.body.lastName, res));
 
-app.get('/angebot',                async (req, res) => await handleGet(req, buildAngebot,        'Angebot',           res));
+app.get('/angebot', async (req, res) => {
+  if (!req.query.data) return res.status(400).send('Veri eksik');
+  try {
+    const b64  = req.query.data.replace(/-/g, '+').replace(/_/g, '/');
+    const d    = JSON.parse(Buffer.from(b64, 'base64').toString('utf-8'));
+    const address = `${d.street||''} ${d.houseNumber||''}, ${d.zip||''} ${d.city||''}, Deutschland`;
+    const satelliteUrl = await getSatelliteUrl(address);
+    await generateAndSend(buildAngebot(d, satelliteUrl), 'Angebot', d.lastName||'Kunde', res);
+  } catch (err) {
+    res.status(500).send('Fehler: ' + err.message);
+  }
+});
 app.get('/aufschiebende',          async (req, res) => await handleGet(req, buildAufschiebende,  'Aufschiebende-Bed', res));
 app.get('/vollmacht',              async (req, res) => await handleGet(req, buildVollmacht,       'Vollmacht',         res));
 
@@ -63,6 +90,32 @@ async function handleGet(req, builder, name, res) {
   } catch (err) {
     res.status(500).send('Fehler: ' + err.message);
   }
+}
+
+// Geocoding + Static Maps URL oluştur
+async function getSatelliteUrl(address) {
+  return new Promise((resolve) => {
+    const query = encodeURIComponent(address);
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${query}&key=${GOOGLE_MAPS_KEY}`;
+    https.get(url, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (json.results && json.results[0]) {
+            const loc = json.results[0].geometry.location;
+            const lat = loc.lat;
+            const lng = loc.lng;
+            const staticUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=18&size=800x300&maptype=satellite&markers=color:red%7C${lat},${lng}&key=${GOOGLE_MAPS_KEY}`;
+            resolve(staticUrl);
+          } else {
+            resolve('');
+          }
+        } catch(e) { resolve(''); }
+      });
+    }).on('error', () => resolve(''));
+  });
 }
 
 async function generateAndSend(html, name, lastName, res) {
@@ -160,8 +213,9 @@ function pageHeader(title) {
   <div class="badge">${title}</div>`;
 }
 
+
 // ── 1. ANGEBOT ────────────────────────────────────────────────
-function buildAngebot(d) {
+function buildAngebot(d, satelliteUrl) {
   const brutto      = parseFloat(d.totalIncl) || 0;
   const netto       = brutto / 1.19;
   const mwst        = brutto - netto;
@@ -187,28 +241,138 @@ function buildAngebot(d) {
   };
 
   const agreementsHtml = (d.agreements || [])
-    .map(v => `<tr><td style="padding:5px 0;font-size:12px;border-bottom:1px solid #f0ede6">✓ ${agreementLabels[v]||v}</td></tr>`)
+    .map(v => `<tr><td style="padding:6px 12px;font-size:12px;border-bottom:1px solid #f0ede6">✓ ${agreementLabels[v]||v}</td></tr>`)
     .join('');
 
-  return `<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8">${baseStyle()}</head><body><div class="page">
-  ${pageHeader('Wärmepumpen Angebot')}
-  <div style="font-size:20px;font-weight:700;margin-bottom:3px">Angebot ${d.angebotNr||''}</div>
-  <div style="font-size:11px;color:#aaa;margin-bottom:18px">Erstellt am ${d.date||new Date().toLocaleDateString('de-DE')}</div>
+  // Ürüne göre detaylı teknik bilgiler
+  const isViessmann250 = (d.moduleName||d.module||'').toString().includes('250');
+  const isViessmann150 = (d.moduleName||d.module||'').toString().includes('150');
+  const isBuderus      = (d.moduleName||d.module||'').toString().includes('BUDERUS') || (d.moduleName||d.module||'').toString().includes('WLW');
+  const moduleName     = d.moduleName || d.module || '–';
 
-  <div class="rbox">
-    <div class="nm">${d.salutation} ${d.firstName} ${d.lastName}${d.companyName?' / '+d.companyName:''}</div>
-    <div class="ad">${d.street} ${d.houseNumber} &bull; ${d.zip} ${d.city}<br>
-    ${d.phoneNumber}${d.mobileNumber?' &bull; '+d.mobileNumber:''}<br>${d.emailAddress}</div>
+  let produktDetails = '';
+  if (isViessmann250) {
+    produktDetails = `
+      <div style="margin-top:8px">
+        <table style="width:100%;font-size:11px;border-collapse:collapse">
+          <tr><td style="padding:3px 8px;color:#666;width:55%">Leistung</td><td style="padding:3px 8px;font-weight:600">${moduleName.match(/\d+kW/)?.[0]||'–'}</td></tr>
+          <tr style="background:#f8fbfd"><td style="padding:3px 8px;color:#666">Modulierender Kompressor</td><td style="padding:3px 8px;font-weight:600">Ja (Inverter)</td></tr>
+          <tr><td style="padding:3px 8px;color:#666">Max. Vorlauftemperatur</td><td style="padding:3px 8px;font-weight:600">70 °C (bis -10 °C Außentemp.)</td></tr>
+          <tr style="background:#f8fbfd"><td style="padding:3px 8px;color:#666">Kältemittel</td><td style="padding:3px 8px;font-weight:600">R290 (Propan, GWP 0,02)</td></tr>
+          <tr><td style="padding:3px 8px;color:#666">Heizbetrieb bis</td><td style="padding:3px 8px;font-weight:600">-20 °C Außentemperatur</td></tr>
+          <tr style="background:#f8fbfd"><td style="padding:3px 8px;color:#666">Anzahl der Phasen</td><td style="padding:3px 8px;font-weight:600">3-phasig</td></tr>
+          <tr><td style="padding:3px 8px;color:#666">Abmessungen (B/T/H)</td><td style="padding:3px 8px;font-weight:600">1144 x 600 x 1382 mm</td></tr>
+          <tr style="background:#f8fbfd"><td style="padding:3px 8px;color:#666">Förderfähig nach BEG</td><td style="padding:3px 8px;font-weight:600;color:#1a5276">Ja</td></tr>
+          <tr><td style="padding:3px 8px;color:#666">Auszeichnung</td><td style="padding:3px 8px;font-weight:600">Testsieger Stiftung Warentest 2025</td></tr>
+        </table>
+      </div>`;
+  } else if (isViessmann150) {
+    produktDetails = `
+      <div style="margin-top:8px">
+        <table style="width:100%;font-size:11px;border-collapse:collapse">
+          <tr><td style="padding:3px 8px;color:#666;width:55%">Leistung</td><td style="padding:3px 8px;font-weight:600">${moduleName.match(/\d+kW/)?.[0]||'–'}</td></tr>
+          <tr style="background:#f8fbfd"><td style="padding:3px 8px;color:#666">Modulierender Kompressor</td><td style="padding:3px 8px;font-weight:600">Ja (Inverter)</td></tr>
+          <tr><td style="padding:3px 8px;color:#666">Max. Vorlauftemperatur</td><td style="padding:3px 8px;font-weight:600">70 °C (A10/A13 Modelle)</td></tr>
+          <tr style="background:#f8fbfd"><td style="padding:3px 8px;color:#666">Kältemittel</td><td style="padding:3px 8px;font-weight:600">R290 (Propan, GWP 0,02)</td></tr>
+          <tr><td style="padding:3px 8px;color:#666">Leistungsbereich</td><td style="padding:3px 8px;font-weight:600">2,1 bis 14,9 kW</td></tr>
+          <tr style="background:#f8fbfd"><td style="padding:3px 8px;color:#666">Ausführung</td><td style="padding:3px 8px;font-weight:600">Monoblock</td></tr>
+          <tr><td style="padding:3px 8px;color:#666">Förderfähig nach BEG</td><td style="padding:3px 8px;font-weight:600;color:#1a5276">Ja</td></tr>
+          <tr style="background:#f8fbfd"><td style="padding:3px 8px;color:#666">Einsatzbereich</td><td style="padding:3px 8px;font-weight:600">Neubau & Modernisierung</td></tr>
+        </table>
+      </div>`;
+  } else if (isBuderus) {
+    produktDetails = `
+      <div style="margin-top:8px">
+        <table style="width:100%;font-size:11px;border-collapse:collapse">
+          <tr><td style="padding:3px 8px;color:#666;width:55%">Leistung</td><td style="padding:3px 8px;font-weight:600">${moduleName.match(/\d+/g)?.[moduleName.match(/\d+/g).length-1]||'–'} kW</td></tr>
+          <tr style="background:#f8fbfd"><td style="padding:3px 8px;color:#666">Kältemittel</td><td style="padding:3px 8px;font-weight:600">R290 (Propan, GWP 0,02)</td></tr>
+          <tr><td style="padding:3px 8px;color:#666">Max. Vorlauftemperatur</td><td style="padding:3px 8px;font-weight:600">70 °C</td></tr>
+          <tr style="background:#f8fbfd"><td style="padding:3px 8px;color:#666">Integrierter Pufferspeicher</td><td style="padding:3px 8px;font-weight:600">70 Liter</td></tr>
+          <tr><td style="padding:3px 8px;color:#666">Elektrischer Zuheizer</td><td style="padding:3px 8px;font-weight:600">9 kW</td></tr>
+          <tr style="background:#f8fbfd"><td style="padding:3px 8px;color:#666">Ausführung</td><td style="padding:3px 8px;font-weight:600">Monoblock (Split-System)</td></tr>
+          <tr><td style="padding:3px 8px;color:#666">Förderfähig nach BEG</td><td style="padding:3px 8px;font-weight:600;color:#1a5276">Ja</td></tr>
+          <tr style="background:#f8fbfd"><td style="padding:3px 8px;color:#666">Smart Grid Ready</td><td style="padding:3px 8px;font-weight:600">Ja</td></tr>
+        </table>
+      </div>`;
+  }
+
+  return `<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8">${baseStyle()}
+  <style>
+    .cover{background:#1a5276;color:#fff;padding:48px;min-height:220px;position:relative;overflow:hidden}
+    .cover::after{content:'';position:absolute;right:-40px;top:-40px;width:220px;height:220px;border-radius:50%;background:rgba(255,255,255,0.06)}
+    .cover h1{font-size:32px;font-weight:700;margin-bottom:6px}
+    .cover .sub{font-size:14px;opacity:0.7;margin-bottom:20px}
+    .cover .nr{font-size:13px;background:rgba(255,255,255,0.15);display:inline-block;padding:5px 14px;border-radius:4px}
+    .berater-box{background:#f0b429;color:#1a1a1a;padding:10px 14px;font-size:12px;font-weight:600;display:inline-block;border-radius:4px;margin-bottom:6px}
+    .pos-header{background:#1a5276;color:#fff;padding:8px 12px;font-size:11px;font-weight:700;letter-spacing:0.3px;margin-bottom:0}
+    .pos-row{border:1px solid #d6eaf8;border-top:none;padding:12px;margin-bottom:16px}
+    .tuv-note{background:#f8fbfd;border:1px solid #d6eaf8;border-radius:6px;padding:10px 14px;font-size:11px;color:#555;margin:16px 0;line-height:1.6}
+  </style>
+  </head><body><div class="page" style="padding:0">
+
+  <!-- KAPAK SAYFASI -->
+  <div class="cover">
+    <div style="font-size:18px;font-weight:700;opacity:0.9;margin-bottom:4px">Volksenergie Schwaben</div>
+    <div style="font-size:10px;opacity:0.5;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:28px">Ihr Spezialist für Erneuerbare Energien</div>
+    <h1>Ihr persönliches Angebot</h1>
+    <div class="sub">${d.salutation} ${d.firstName} ${d.lastName} &bull; ${d.street} ${d.houseNumber}, ${d.zip} ${d.city}</div>
+    <div class="nr">Angebot ${d.angebotNr||''} &nbsp;&bull;&nbsp; ${d.date||new Date().toLocaleDateString('de-DE')}</div>
   </div>
 
-  <p style="font-size:13px;color:#444;line-height:1.75;margin-bottom:22px">
+  <div style="padding:40px 48px">
+
+  <!-- UYDU GÖRSELİ -->
+  <div style="margin-bottom:24px;border-radius:10px;overflow:hidden;border:2px solid #d6eaf8">
+    <img src="${satelliteUrl}" style="width:100%;height:200px;object-fit:cover;display:block" onerror="this.style.display='none'">
+    <div style="padding:6px 12px;background:#f8fbfd;font-size:10px;color:#888">
+      ${d.street} ${d.houseNumber}, ${d.zip} ${d.city} — Satellitenansicht
+    </div>
+  </div>
+
+  <!-- BERATER + KONTAKT -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid #e0ddd5">
+    <div>
+      <div class="berater-box">Ihr persönlicher Berater: ${FIRMA.gf}</div><br>
+      <div style="font-size:12px;color:#666;margin-top:4px">
+        Tel: ${FIRMA.tel} &bull; ${FIRMA.mail}<br>
+        Erreichbar: Mo–Fr 9:00–17:00 Uhr
+      </div>
+    </div>
+    <div style="text-align:right;font-size:11px;color:#aaa;line-height:1.8">
+      ${FIRMA.adresse}<br>${FIRMA.web}
+    </div>
+  </div>
+
+  <!-- ANSCHREIBEN -->
+  <p style="font-size:13px;color:#444;line-height:1.8;margin-bottom:28px">
     Sehr geehrte${d.salutation==='Frau'?'':'r'} ${d.salutation} ${d.lastName},<br><br>
     wir freuen uns, Ihnen heute das Angebot für Ihre Wärmepumpe zusenden zu können.
-    Gerne stehen wir Ihnen jederzeit mit Rat und Tat zur Seite.
+    Gerne stehen wir Ihnen jederzeit mit Rat und Tat zur Seite und unterstützen Sie
+    in der zügigen Planung, Errichtung und Installation Ihrer Wärmepumpe.<br><br>
+    Sie erreichen uns Montags bis Freitags zwischen 9:00 und 17:00 Uhr unter
+    <strong>${FIRMA.tel}</strong>. Außerhalb unserer Geschäftszeiten erreichen Sie uns
+    per E-Mail: <strong>${FIRMA.mail}</strong>.<br><br>
+    Auf den folgenden Seiten finden Sie Ihr persönliches Angebot sowie alle relevanten Unterlagen.<br><br>
+    Wir freuen uns auf Ihre Bestellung und sichern Ihnen pünktliche Lieferung und Montage zu.
   </p>
+  <div style="font-size:13px;color:#444;margin-bottom:32px">
+    Mit freundlichen Grüßen,<br>
+    <strong>${FIRMA.name}</strong>
+  </div>
 
-  <div class="sec">Technische Eckdaten</div>
-  <div class="tgrid">
+  <!-- TRENNLINIE -->
+  <div style="border-top:2.5px solid #1a5276;margin:32px 0 28px"></div>
+
+  <!-- ANGEBOTSDETAILS TITEL -->
+  <div style="text-align:center;margin-bottom:24px">
+    <div style="font-size:22px;font-weight:700;color:#1a5276">Angebotsdetails ${d.angebotNr||''}</div>
+    <div style="font-size:11px;color:#aaa;margin-top:4px">Leistungsübersicht der ${FIRMA.name}</div>
+    <div style="font-size:11px;color:#666;margin-top:2px">Beratung | Planung | Finanzservice | Logistik | Montage und Inbetriebnahme durch unsere zertifizierten Fachkräfte</div>
+  </div>
+
+  <!-- TECHNISCHE ECKDATEN -->
+  <div class="sec">Technische Eckdaten des Objektes</div>
+  <div class="tgrid" style="margin-bottom:24px">
     <div class="titem"><div class="tlabel">Wohnfläche</div><div class="tval">${d.wohnflaeche||'–'} m²</div></div>
     <div class="titem"><div class="tlabel">Baujahr</div><div class="tval">${d.baujahr||'–'}</div></div>
     <div class="titem"><div class="tlabel">Heizkörper</div><div class="tval">${d.heizkoerper||'–'}</div></div>
@@ -217,55 +381,106 @@ function buildAngebot(d) {
     <div class="titem"><div class="tlabel">Heizkosten/Jahr</div><div class="tval">${d.kwhprice?parseFloat(d.kwhprice).toLocaleString('de-DE',{minimumFractionDigits:2})+' €':'–'}</div></div>
   </div>
 
-  <div class="sec">Leistungsübersicht</div>
+  <!-- POS 1: AUSSENGERÄT -->
+  <div class="pos-header">POS 1 — Wärmepumpen Außengerät</div>
+  <div class="pos-row">
+    <div style="font-size:13px;font-weight:700;color:#1a5276;margin-bottom:6px">${moduleName}</div>
+    ${produktDetails}
+  </div>
+
+  <!-- POS 2: INNENEINHEIT -->
+  <div class="pos-header">POS 2 — Wärmepumpen Inneneinheit</div>
+  <div class="pos-row">
+    <div style="font-size:12px;color:#444;line-height:1.7">
+      Kompakte Inneneinheit für effizientes Heizen und Kühlen. Die Inneneinheit übernimmt die
+      komplette hydraulische Einbindung der Wärmepumpe und enthält alle wichtigen Komponenten
+      wie Umwälzpumpe, Umschaltventil und Sicherheitsarmaturen. Dank Vorlauftemperaturen bis
+      70 °C eignet sie sich ideal für Neubauten und Modernisierungen.
+    </div>
+  </div>
+
+  <!-- POS 3-15 KOMPAKT -->
   <table class="pos">
     <thead><tr><th class="pn">POS</th><th>Bezeichnung</th></tr></thead>
     <tbody>
-      <tr><td class="pn">1</td><td><div class="pt">Wärmepumpen Außengerät</div><div class="pd">${d.moduleName||d.module||'–'} &bull; R290 &bull; Vorlauftemperatur bis 70°C &bull; Förderfähig nach BEG</div></td></tr>
-      <tr><td class="pn">2</td><td><div class="pt">Wärmepumpen Inneneinheit</div><div class="pd">Kompakte Inneneinheit inkl. Umwälzpumpe, Umschaltventil und Sicherheitsarmaturen</div></td></tr>
-      <tr><td class="pn">3</td><td><div class="pt">Hochleistungs-Pufferspeicher 75L</div><div class="pd">Max. 3 bar &bull; bis 110°C &bull; Vliesdämmung</div></td></tr>
-      <tr><td class="pn">4</td><td><div class="pt">Hochleistungs-Hygienespeicher 300L</div><div class="pd">Max. 10 bar &bull; Max. 95°C &bull; El. Zusatzheizung 3kW &bull; Klasse A+++</div></td></tr>
-      <tr><td class="pn">5</td><td><div class="pt">Elektrische Zusatzheizung</div><div class="pd">Bis 9 kW &bull; Automatischer Zuschaltbetrieb &bull; Förderfähig nach BEG</div></td></tr>
-      <tr><td class="pn">6</td><td><div class="pt">Verrohrungssystem</div><div class="pd">Gemäß GEG &bull; Druckprüfung und Dichtheitsnachweis</div></td></tr>
-      <tr><td class="pn">7</td><td><div class="pt">Demontage Altanlage & Montage Neuanlage</div><div class="pd">Fachgerechte Stilllegung &bull; Aufstellung und Einbindung Wärmepumpe</div></td></tr>
-      <tr><td class="pn">8</td><td><div class="pt">Projektierung – Planung & technische Auslegung</div><div class="pd">Heizlastberechnung DIN EN 12831 &bull; Hydraulikschema &bull; Förderunterstützung</div></td></tr>
-      <tr><td class="pn">9</td><td><div class="pt">Fördermittel – Unterstützung & Abwicklung</div><div class="pd">BEG EM über KfW &bull; Optimale Förderoption &bull; Vollständige Abwicklung</div></td></tr>
-      <tr><td class="pn">10</td><td><div class="pt">Anmeldung und Fertigmeldung beim Netzbetreiber</div><div class="pd">EVU-Anmeldung &bull; Betriebsschaltbild &bull; Prüfprotokoll</div></td></tr>
-      <tr><td class="pn">11</td><td><div class="pt">Elektroinstallation Anschluss & Steuerung</div><div class="pd">Fachgerechte Verlegung &bull; FI-Schalter &bull; Eingetragener Elektrofachbetrieb</div></td></tr>
-      <tr><td class="pn">12</td><td><div class="pt">Erstinbetriebnahme gemäß Herstellervorgaben</div><div class="pd">Druckprüfung &bull; Parametrierung &bull; Einweisung des Betreibers</div></td></tr>
-      <tr><td class="pn">13</td><td><div class="pt">Hydraulischer Abgleich – Verfahren B (VdZ)</div><div class="pd">VdZ-Nachweis &bull; Voraussetzung für BEG EM Förderung</div></td></tr>
-      <tr><td class="pn">14</td><td><div class="pt">Technischer Support</div><div class="pd">Hersteller & Volksenergie Schwaben Service-Team</div></td></tr>
-      <tr><td class="pn">15</td><td><div class="pt">Volksenergie Schwaben Garantieversprechen</div><div class="pd">Bestpreisgarantie &bull; Festpreisgarantie &bull; 100% Käuferschutz &bull; Keine Vorkasse</div></td></tr>
+      <tr><td class="pn">3</td><td><div class="pt">Hochleistungs-Pufferspeicher 75L</div><div class="pd">✓ 75 Liter &bull; Innen roh, außen grundiert &bull; Max. 3 bar &bull; bis 110°C &bull; Vliesdämmung</div></td></tr>
+      <tr><td class="pn">4</td><td><div class="pt">Hochleistungs-Hygienespeicher 300L</div><div class="pd">✓ 300 Liter &bull; Stahl S235JR &bull; Max. 10 bar &bull; Max. 95°C &bull; El. Zusatzheizung 3kW &bull; Energieklasse A+++</div></td></tr>
+      <tr><td class="pn">5</td><td><div class="pt">Elektrische Zusatzheizung (pauschal)</div><div class="pd">✓ Bis 9 kW &bull; Werkseitig verbaut &bull; Automatischer Zuschaltbetrieb &bull; Förderfähig nach BEG &bull; Kein Dauerbetrieb</div></td></tr>
+      <tr><td class="pn">6</td><td><div class="pt">Verrohrungssystem (pauschal)</div><div class="pd">✓ Systemkonform &bull; Wärme-/Kälteisolierung gemäß GEG &bull; Druckprüfung &bull; Dichtheitsnachweis &bull; TÜV-geprüfte Komponenten</div></td></tr>
+      <tr><td class="pn">7</td><td><div class="pt">Demontage Altanlage & Montage Neuanlage (pauschal)</div><div class="pd">✓ Fachgerechte Stilllegung &bull; Ausbau Altheizung &bull; Gasleitungsverschluss gemäß DVGW &bull; Aufstellung & Einbindung WP</div></td></tr>
+      <tr><td class="pn">8</td><td><div class="pt">Projektierung – Planung & technische Auslegung (pauschal)</div><div class="pd">✓ Heizlastberechnung DIN EN 12831 &bull; Hydraulikschema &bull; Abstimmung Netzbetreiber/Schornsteinfeger &bull; Förderantrag BEG EM</div></td></tr>
+      <tr><td class="pn">9</td><td><div class="pt">Fördermittel – Unterstützung & Abwicklung (pauschal)</div><div class="pd">✓ BEG EM über KfW &bull; Effizienz-/Emissionsbonus &bull; BzA/BnD Erstellung &bull; Koordination Energieeffizienz-Experte &bull; Vollständige Abwicklung</div></td></tr>
+      <tr><td class="pn">10</td><td><div class="pt">Anmeldung und Fertigmeldung beim Netzbetreiber (pauschal)</div><div class="pd">✓ EVU-Anmeldung &bull; Betriebsschaltbild &bull; Prüfprotokoll &bull; Fertigmeldung &bull; Schriftverkehr komplett</div></td></tr>
+      <tr><td class="pn">11</td><td><div class="pt">Elektroinstallation Anschluss & Steuerung (pauschal)</div><div class="pd">✓ Stromzuleitung &bull; FI-/Leitungsschutzschalter &bull; Steuer-/Datenleitungen &bull; Eingetragener Elektrofachbetrieb mit Nachweis</div></td></tr>
+      <tr><td class="pn">12</td><td><div class="pt">Erstinbetriebnahme gemäß Herstellervorgaben (pauschal)</div><div class="pd">✓ Druckprüfung &bull; Parametrierung Heizkurven &bull; Testlauf &bull; Betreibereinweisung &bull; Vollständige Anlagendokumentation</div></td></tr>
+      <tr><td class="pn">13</td><td><div class="pt">Hydraulischer Abgleich – Verfahren B nach VdZ (pauschal)</div><div class="pd">✓ VdZ-Nachweis &bull; Raumweise Heizlastberechnung DIN EN 12831 &bull; Volumenströme je Heizkreis &bull; Pflicht für BEG EM Förderung</div></td></tr>
+      <tr><td class="pn">14</td><td><div class="pt">Technischer Support (pauschal)</div><div class="pd">✓ Hersteller-Service-Team direkt &bull; ${FIRMA.name} Service-Team &bull; Ferndiagnose möglich</div></td></tr>
+      <tr><td class="pn">15</td><td><div class="pt">${FIRMA.name} – Garantieversprechen</div><div class="pd">✓ Bestpreisgarantie &bull; Festpreisgarantie: schlüsselfertig ohne Mehrpreisrisiken &bull; 100% Käuferschutz &bull; Keine Vorkasse &bull; Mündliche Abmachungen nicht Vertragsbestandteil</div></td></tr>
     </tbody>
   </table>
 
-  ${agreementsHtml?`<div class="sec">Zusatzvereinbarungen</div><table style="width:100%;border-collapse:collapse;margin-bottom:18px"><tbody>${agreementsHtml}</tbody></table>`:''}
+  ${agreementsHtml?`
+  <div class="sec">Zusatzvereinbarungen</div>
+  <table style="width:100%;border-collapse:collapse;margin-bottom:20px;border:1px solid #d6eaf8;border-radius:6px;overflow:hidden">
+    <tbody>${agreementsHtml}</tbody>
+  </table>`:''}
 
+  <div class="tuv-note">
+    Unsere Fachpartner verwenden ausschließlich <strong>TÜV-geprüfte Komponenten</strong>, die sämtlichen gängigen Normen
+    und Zertifizierungen entsprechen. Es gelten die Garantien nach Herstellerangaben.
+  </div>
+
+  <!-- ZAHLUNG -->
   <div class="sec">Zahlungsmodalitäten</div>
   <table class="zahl">
-    <tr><td>1. Abschlag, 80%, bei Warenlieferung</td><td>${fmt(brutto*0.8)} €</td></tr>
-    <tr><td>2. Abschlag, 20%, bei Inbetriebnahme</td><td>${fmt(brutto*0.2)} €</td></tr>
+    <tr><td style="font-weight:500">1. Abschlag, 80%, bei Warenlieferung</td><td style="color:#1a5276;font-size:14px">${fmt(brutto*0.8)} €</td></tr>
+    <tr><td style="font-weight:500">2. Abschlag, 20%, bei Inbetriebnahme</td><td style="color:#1a5276;font-size:14px">${fmt(brutto*0.2)} €</td></tr>
   </table>
 
+  <!-- PREISBOX -->
   <div class="pricebox">
     <div class="prow"><span>Gesamtsumme Netto</span><span>${fmt(netto)} €</span></div>
     <div class="prow"><span>19% MwSt.</span><span>${fmt(mwst)} €</span></div>
     <div class="prow main"><span>Gesamtsumme Brutto</span><span>${fmt(brutto)} €</span></div>
-    ${foerder>0?`<div class="prow fo"><span>Fördersumme (${d.heatingcosts||''}%)</span><span>${fmt(foerder)} €</span></div>
-    <div class="prow eg"><span>Eigenanteil nach Förderung</span><span>${fmt(eigenanteil)} €</span></div>`:''}
+    ${foerder>0?`
+    <div class="prow fo"><span>Ihre Fördersumme (${d.heatingcosts||''}% KfW BEG)</span><span>${fmt(foerder)} €</span></div>
+    <div class="prow eg"><span>Ihr Eigenanteil nach Förderung</span><span>${fmt(eigenanteil)} €</span></div>`:''}
   </div>
 
-  <p style="font-size:12px;color:#555;line-height:1.7;margin-bottom:18px">
+  <!-- KONTAKT BOX -->
+  <div style="background:#d6eaf8;border-radius:8px;padding:14px 18px;text-align:center;margin-bottom:24px;font-size:12px;color:#1a5276">
+    <strong>Bei Rückfragen stehen wir Ihnen jederzeit zur Verfügung</strong><br>
+    Telefon: ${FIRMA.tel} &nbsp;&bull;&nbsp; E-Mail: ${FIRMA.mail} &nbsp;&bull;&nbsp; ${FIRMA.web}
+  </div>
+
+  <!-- UNTERSCHRIFT -->
+  <p style="font-size:12px;color:#555;line-height:1.7;margin-bottom:6px">
     Hiermit nehme ich das Angebot vom ${d.date||new Date().toLocaleDateString('de-DE')} an
-    und beauftrage die ${FIRMA.name} zur Durchführung meines Projektes.
+    und beauftrage die <strong>${FIRMA.name}</strong> zur Durchführung meines Projektes.
   </p>
-  <div class="sig-line"></div>
-  <div class="sig-label">Ort, Datum, Unterschrift — ${d.salutation} ${d.firstName} ${d.lastName}</div>
+  <div style="display:flex;justify-content:space-between;margin-top:24px">
+    <div>
+      <div style="font-size:11px;color:#aaa;margin-bottom:28px">${d.city||'___________'}, ${d.date||'___________'}</div>
+      <div class="sig-line" style="width:200px"></div>
+      <div class="sig-label">Ort, Datum</div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:11px;color:#aaa;margin-bottom:28px">&nbsp;</div>
+      <div class="sig-line" style="width:240px"></div>
+      <div class="sig-label">Unterschrift — ${d.salutation} ${d.firstName} ${d.lastName}</div>
+    </div>
+  </div>
+
   ${firmaFooter()}
-  <div class="disclaimer">Sofern eine Teilzahlungsvereinbarung geschlossen wird, wird diese zum wesentlichen Bestandteil dieses Auftrages.
-  Die staatlichen Fördermittel sind nicht Bestandteil dieses Angebots. ${FIRMA.name} übernimmt keine Haftung dafür.
-  Mündliche Abmachungen sind nicht Bestandteil des Vertrags.</div>
-</div></body></html>`;
+  <div class="disclaimer">
+    Sofern eine Teilzahlungsvereinbarung geschlossen wird, wird diese zum wesentlichen Bestandteil dieses Auftrages.
+    Die o.g. Zahlungsbedingungen entfallen dann; der Zahlungsausgleich erfolgt nach Abnahme durch die refinanzierende Bank.
+    Die staatlichen Fördermittel sind nicht Bestandteil dieses Angebots. ${FIRMA.name} übernimmt keine Haftung dafür.
+    Mündliche Abmachungen oder Vereinbarungen sind nicht Bestandteil des Vertrags.
+  </div>
+
+  </div><!-- /padding -->
+  </div></body></html>`;
 }
 
 // ── 2. AUFSCHIEBENDE BEDINGUNGEN ─────────────────────────────
