@@ -261,21 +261,22 @@ function buildAngebot(d, satelliteUrl) {
     .join('');
 
   // Ürüne göre resim seç
-  let imgAussen = PRODUKT_IMAGES.viessmann_250_aussen;
-  let imgInnen  = PRODUKT_IMAGES.viessmann_250_innen;
-  if (isViessmann150) {
-    imgAussen = PRODUKT_IMAGES.viessmann_150_aussen;
-    imgInnen  = PRODUKT_IMAGES.viessmann_250_innen; // 150 innen benzer
-  } else if (isBuderus) {
-    imgAussen = PRODUKT_IMAGES.buderus_aussen;
-    imgInnen  = PRODUKT_IMAGES.buderus_innen;
-  }
-
-  // Ürüne göre detaylı teknik bilgiler
+  // Ürüne göre değişkenler
   const isViessmann250 = (d.moduleName||d.module||'').toString().includes('250');
   const isViessmann150 = (d.moduleName||d.module||'').toString().includes('150');
   const isBuderus      = (d.moduleName||d.module||'').toString().includes('BUDERUS') || (d.moduleName||d.module||'').toString().includes('WLW');
   const moduleName     = d.moduleName || d.module || '–';
+
+  // Ürüne göre resim seç
+  let imgAussen = PRODUKT_IMAGES.viessmann_250_aussen;
+  let imgInnen  = PRODUKT_IMAGES.viessmann_250_innen;
+  if (isViessmann150) {
+    imgAussen = PRODUKT_IMAGES.viessmann_150_aussen;
+    imgInnen  = PRODUKT_IMAGES.viessmann_150_innen;
+  } else if (isBuderus) {
+    imgAussen = PRODUKT_IMAGES.buderus_aussen;
+    imgInnen  = PRODUKT_IMAGES.buderus_innen;
+  }
 
   let produktDetails = '';
   if (isViessmann250) {
