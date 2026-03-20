@@ -767,29 +767,68 @@ table.zahl td:last-child{text-align:right;font-weight:700;color:#1a4a1a}
       Angebot ${d.angebotNr||'–'} &nbsp;&bull;&nbsp; ${d.date||new Date().toLocaleDateString('de-DE')}
     </div>
 
-    <!-- ORTA ALAN - Büyük firma yazısı -->
-    <div style="margin-top:14mm;position:relative;z-index:2">
-      <div style="font-size:52px;font-weight:900;color:rgba(255,255,255,0.08);
-                  letter-spacing:-2px;line-height:1;margin-bottom:0;
-                  font-family:Lato,Arial,sans-serif">
-        Volksenergie<br>Schwaben
-      </div>
-      <div style="display:flex;align-items:center;gap:16px;margin-top:6mm">
-        <div style="flex:1;height:1px;background:rgba(245,184,0,0.3)"></div>
-        <div style="font-size:13px;font-weight:700;color:rgba(245,184,0,0.7);
-                    letter-spacing:4px;text-transform:uppercase">
-          Unsere Region
+    <!-- ORTA ALAN -->
+    <div style="margin-top:10mm;position:relative;z-index:2">
+
+      <!-- Büyük slogan -->
+      <div style="margin-bottom:8mm">
+        <div style="font-size:11px;font-weight:700;color:rgba(245,184,0,0.6);
+                    letter-spacing:4px;text-transform:uppercase;margin-bottom:5mm">
+          Unsere Region · Unsere Energie
         </div>
-        <div style="flex:1;height:1px;background:rgba(245,184,0,0.3)"></div>
+        <div style="width:48px;height:3px;background:#f5b800;border-radius:2px;margin-bottom:7mm"></div>
+        <div style="font-size:14px;color:rgba(255,255,255,0.55);line-height:1.9;max-width:340px">
+          Wir sind Ihr regionaler Partner für nachhaltige Energie­lösungen in Schwaben.
+          Mit modernster Wärmepumpen­technologie senken wir Ihre Heizkosten dauerhaft.
+        </div>
       </div>
-      <div style="margin-top:5mm;text-align:right;padding-right:8mm">
-        <span style="font-size:22px;font-weight:900;color:rgba(245,184,0,0.5);
-                     letter-spacing:2px;text-transform:uppercase;
-                     transform:rotate(-4deg);display:inline-block;
-                     font-style:italic">
-          Unsere Energie
-        </span>
+
+      <!-- 3 özellik kutusu -->
+      <div style="display:flex;gap:8px;margin-bottom:8mm">
+        <div style="flex:1;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);
+                    border-radius:8px;padding:10px 12px">
+          <div style="font-size:20px;margin-bottom:4px">🌱</div>
+          <div style="font-size:11px;font-weight:700;color:#fff;margin-bottom:2px">Nachhaltig</div>
+          <div style="font-size:10px;color:rgba(255,255,255,0.5);line-height:1.5">
+            R290 Kältemittel · GWP 0,02 · klimafreundlich
+          </div>
+        </div>
+        <div style="flex:1;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);
+                    border-radius:8px;padding:10px 12px">
+          <div style="font-size:20px;margin-bottom:4px">⚡</div>
+          <div style="font-size:11px;font-weight:700;color:#fff;margin-bottom:2px">Effizient</div>
+          <div style="font-size:10px;color:rgba(255,255,255,0.5);line-height:1.5">
+            Bis zu 70°C Vorlauf · Inverter-Technologie
+          </div>
+        </div>
+        <div style="flex:1;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);
+                    border-radius:8px;padding:10px 12px">
+          <div style="font-size:20px;margin-bottom:4px">🏆</div>
+          <div style="font-size:11px;font-weight:700;color:#fff;margin-bottom:2px">Gefördert</div>
+          <div style="font-size:10px;color:rgba(255,255,255,0.5);line-height:1.5">
+            KfW BEG · Bis zu 70% Förderung möglich
+          </div>
+        </div>
       </div>
+
+      <!-- Ayırıcı çizgi + slogan -->
+      <div style="border-top:1px solid rgba(245,184,0,0.25);padding-top:7mm">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:4mm">
+          <div style="width:32px;height:2px;background:#f5b800;border-radius:1px"></div>
+          <div style="font-size:13px;font-weight:900;color:rgba(255,255,255,0.9);
+                      letter-spacing:2px;text-transform:uppercase">
+            Unsere Region
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:32px;height:2px;background:rgba(245,184,0,0.4);border-radius:1px"></div>
+          <div style="font-size:13px;font-weight:900;color:rgba(245,184,0,0.7);
+                      letter-spacing:2px;text-transform:uppercase">
+            Unsere Energie
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
   <div class="cover-bottom">
