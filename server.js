@@ -43,6 +43,122 @@ const LOGO_URL = BASE_URL + '/images/logo.png';
 app.get('/',     (req, res) => res.json({ status: 'ok', service: 'Volksenergie Schwaben v5' }));
 app.get('/ping', (req, res) => res.json({ pong: true }));
 
+// ── SUPABASE ENDPOINTS ───────────────────────────────────────
+// Angebot kaydet (http-functions.js'den çağrılır)
+app.post('/save-angebot', async (req, res) => {
+  try {
+    const d = req.body;
+    await supabase('post', 'angebote', {
+      angebot_nr:        d.angebotNr,
+      salutation:        d.salutation,
+      first_name:        d.firstName,
+      last_name:         d.lastName,
+      street:            d.street,
+      house_number:      d.houseNumber,
+      zip:               d.zip,
+      city:              d.city,
+      phone:             d.phoneNumber,
+      mobile:            d.mobileNumber,
+      email:             d.emailAddress,
+      wohnflaeche:       d.wohnflaeche,
+      baujahr:           d.baujahr,
+      heizkoerper:       d.heizkoerper,
+      heizenergieart:    d.heizenergieart,
+      energy:            d.energy,
+      kwhprice:          d.kwhprice,
+      module_name:       d.moduleName || d.module,
+      total_excl:        parseFloat(d.totalExcl) || 0,
+      total_incl:        parseFloat(d.totalIncl) || 0,
+      foerder_pct:       parseInt(d.heatingcosts) || 0,
+      foerder_summe:     parseFloat(d.foerderSumme) || 0,
+      eigenanteil:       parseFloat(d.totalIncl) - parseFloat(d.foerderSumme) || 0,
+      angebot_link:      d.angebotLink,
+      aufschiebende_link: d.aufschiebendeLink,
+      vollmacht_link:    d.vollmachtLink,
+      broschure_link:    d.broschureLink,
+      status:            'gesendet',
+      angebot_date:      new Date().toISOString().split('T')[0],
+      expires_at:        new Date(Date.now() + 30*24*60*60*1000).toISOString(),
+    });
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Supabase save error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Görüntülendi kaydı + bildirim
+app.post('/seen/:angebotNr', async (req, res) => {
+  try {
+    const nr = req.params.angebotNr;
+    const rows = await supabase('get', 'angebote', null, 'angebot_nr=eq.' + nr + '&select=*');
+    if (!rows || rows.length === 0) return res.json({ ok: true });
+    const row = rows[0];
+
+    const isFirst = !row.first_seen_at;
+    await supabase('patch', 'angebote', {
+      status:        row.status === 'gesendet' ? 'gesehen' : row.status,
+      gezaehlt:      (row.gezaehlt || 0) + 1,
+      first_seen_at: row.first_seen_at || new Date().toISOString(),
+      last_seen_at:  new Date().toISOString(),
+    }, 'angebot_nr=eq.' + nr);
+
+    // İlk görüntülemede email gönder
+    if (isFirst) {
+      const name = (row.salutation||'') + ' ' + (row.first_name||'') + ' ' + (row.last_name||'');
+      await sendNotificationEmail(nr, name.trim(), row.city);
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('Seen error:', e.message);
+    res.json({ ok: true }); // hata olsa da sayfayı engelleme
+  }
+});
+
+// İmza kaydet
+app.post('/sign/:angebotNr', async (req, res) => {
+  try {
+    const nr = req.params.angebotNr;
+    const { signature } = req.body;
+    await supabase('patch', 'angebote', {
+      status:            'unterschrieben',
+      unterschrieben_at: new Date().toISOString(),
+      signature_data:    signature,
+    }, 'angebot_nr=eq.' + nr);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Dashboard API — tüm angebotlar
+app.get('/api/angebote', async (req, res) => {
+  try {
+    const rows = await supabase('get', 'angebote', null,
+      'select=*&order=created_at.desc&limit=200');
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Bildirim emaili
+async function sendNotificationEmail(nr, name, city) {
+  try {
+    await axios.post('https://api.resend.com/emails', {
+      from: 'Volksenergie Schwaben <noreply@volksenergieschwaben.de>',
+      to:   'info@volksenergieschwaben.de',
+      subject: `📄 Angebot ${nr} wurde geöffnet — ${name}`,
+      html: `<p><strong>${name}</strong> aus <strong>${city}</strong> hat das Angebot <strong>${nr}</strong> gerade geöffnet.</p>
+             <p>Zeitpunkt: ${new Date().toLocaleString('de-DE')}</p>`
+    }, {
+      headers: { 'Authorization': 'Bearer ' + (process.env.RESEND_API_KEY||'') }
+    });
+  } catch(e) {
+    console.warn('Notification email failed:', e.message);
+  }
+}
+
 // ── BROSCHÜRE ─────────────────────────────────────────────────
 app.get('/broschure', (req, res) => {
   const m = (req.query.module || '').toString();
@@ -837,14 +953,45 @@ table.zahl td:last-child{text-align:right;font-weight:700;color:#1a4a1a}
     Bei Rückfragen: <strong>${FIRMA.tel}</strong> &nbsp;&bull;&nbsp; <strong>${FIRMA.mail}</strong> &nbsp;&bull;&nbsp; ${FIRMA.web}
   </div>
 
-  <p style="font-size:10.5px;color:#555;line-height:1.7;margin-bottom:7mm">
+  <p style="font-size:10.5px;color:#555;line-height:1.7;margin-bottom:5mm">
     Hiermit nehme ich das Angebot vom ${d.date||new Date().toLocaleDateString('de-DE')} an
     und beauftrage die <strong>${FIRMA.name}</strong> zur Durchführung meines Projektes.
   </p>
 
-  <div class="sig-wrap">
-    <div style="width:45%"><div class="sig-line"></div><div class="sig-label">Ort, Datum</div></div>
-    <div style="width:50%"><div class="sig-line"></div><div class="sig-label">Unterschrift — ${d.salutation} ${d.firstName} ${d.lastName}</div></div>
+  <!-- DİJİTAL İMZA -->
+  <div id="sig-section">
+    <div style="font-size:10px;color:#5a5a4a;margin-bottom:3mm">Bitte unterschreiben Sie hier digital:</div>
+    <canvas id="sig-canvas" width="500" height="120"
+      style="border:1.5px solid #1a4a1a;border-radius:6px;background:#fff;
+             cursor:crosshair;touch-action:none;width:100%;max-width:500px;display:block"></canvas>
+    <div style="display:flex;gap:8px;margin-top:6px">
+      <button onclick="clearSig()" style="background:#e8d5b0;border:none;padding:5px 12px;
+        border-radius:4px;font-size:11px;cursor:pointer;color:#1a4a1a;font-weight:700">
+        ✕ Löschen
+      </button>
+      <button onclick="saveSig()" id="sig-btn" style="background:#1a4a1a;border:none;padding:5px 16px;
+        border-radius:4px;font-size:11px;cursor:pointer;color:#fff;font-weight:700">
+        ✓ Unterschrift speichern
+      </button>
+      <span id="sig-status" style="font-size:11px;color:#2d7a2d;align-self:center;display:none">
+        ✓ Unterschrift gespeichert
+      </span>
+    </div>
+  </div>
+
+  <div class="sig-wrap" style="margin-top:5mm">
+    <div style="width:45%">
+      <div class="sig-line"></div>
+      <div class="sig-label">Ort, Datum</div>
+    </div>
+    <div style="width:50%">
+      <div style="border:1.5px solid #1a4a1a;border-radius:4px;height:50px;
+                  background:#fff;display:flex;align-items:center;justify-content:center;
+                  overflow:hidden" id="sig-preview">
+        <span style="font-size:9px;color:#aaa">Unterschrift erscheint hier</span>
+      </div>
+      <div class="sig-label">Unterschrift — ${d.salutation} ${d.firstName} ${d.lastName}</div>
+    </div>
   </div>
 
   <div style="margin-top:8mm">
@@ -863,6 +1010,83 @@ table.zahl td:last-child{text-align:right;font-weight:700;color:#1a4a1a}
 </div><!-- /pdf-main -->
 
 <script>
+// ── GÖRÜNTÜLENDI PING ──────────────────────────────
+const ANGEBOT_NR = '${d.angebotNr||""}';
+const BASE = '${BASE_URL}';
+if (ANGEBOT_NR) {
+  fetch(BASE + '/seen/' + ANGEBOT_NR, { method: 'POST' }).catch(() => {});
+}
+
+// ── 30 GÜN GEÇERLİLİK KONTROLÜ ────────────────────
+const expiresAt = new Date('${new Date(Date.now()+30*24*60*60*1000).toISOString()}');
+if (new Date() > expiresAt) {
+  document.body.innerHTML = \`
+    <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;
+                background:#1a4a1a;font-family:Arial,sans-serif;text-align:center;color:#fff">
+      <div>
+        <div style="font-size:64px;margin-bottom:16px">⏰</div>
+        <div style="font-size:24px;font-weight:700;margin-bottom:8px">Angebot abgelaufen</div>
+        <div style="font-size:14px;opacity:.7">Dieses Angebot ist nicht mehr gültig.<br>
+        Bitte kontaktieren Sie uns für ein neues Angebot.</div>
+        <div style="margin-top:24px;font-size:13px;opacity:.6">+49 731 14395542 · info@volksenergieschwaben.de</div>
+      </div>
+    </div>\`;
+}
+
+// ── DİJİTAL İMZA ───────────────────────────────────
+const canvas = document.getElementById('sig-canvas');
+const ctx = canvas ? canvas.getContext('2d') : null;
+let drawing = false;
+let hasSig = false;
+
+function getPos(e, el) {
+  const r = el.getBoundingClientRect();
+  const scaleX = el.width / r.width;
+  const scaleY = el.height / r.height;
+  const src = e.touches ? e.touches[0] : e;
+  return { x: (src.clientX - r.left) * scaleX, y: (src.clientY - r.top) * scaleY };
+}
+
+if (canvas) {
+  ctx.strokeStyle = '#1a4a1a';
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  canvas.addEventListener('mousedown',  e => { drawing=true; const p=getPos(e,canvas); ctx.beginPath(); ctx.moveTo(p.x,p.y); });
+  canvas.addEventListener('mousemove',  e => { if(!drawing) return; const p=getPos(e,canvas); ctx.lineTo(p.x,p.y); ctx.stroke(); hasSig=true; });
+  canvas.addEventListener('mouseup',    () => { drawing=false; });
+  canvas.addEventListener('mouseleave', () => { drawing=false; });
+  canvas.addEventListener('touchstart', e => { e.preventDefault(); drawing=true; const p=getPos(e,canvas); ctx.beginPath(); ctx.moveTo(p.x,p.y); }, {passive:false});
+  canvas.addEventListener('touchmove',  e => { e.preventDefault(); if(!drawing) return; const p=getPos(e,canvas); ctx.lineTo(p.x,p.y); ctx.stroke(); hasSig=true; }, {passive:false});
+  canvas.addEventListener('touchend',   () => { drawing=false; });
+}
+
+function clearSig() {
+  if (!ctx) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  hasSig = false;
+  document.getElementById('sig-preview').innerHTML = '<span style="font-size:9px;color:#aaa">Unterschrift erscheint hier</span>';
+  document.getElementById('sig-status').style.display = 'none';
+}
+
+async function saveSig() {
+  if (!hasSig) { alert('Bitte zuerst unterschreiben!'); return; }
+  const sigData = canvas.toDataURL('image/png');
+  const preview = document.getElementById('sig-preview');
+  preview.innerHTML = '<img src="' + sigData + '" style="height:46px;object-fit:contain">';
+  document.getElementById('sig-status').style.display = 'inline';
+  document.getElementById('sig-btn').textContent = '✓ Gespeichert';
+  document.getElementById('sig-btn').style.background = '#2d7a2d';
+  if (ANGEBOT_NR) {
+    fetch(BASE + '/sign/' + ANGEBOT_NR, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signature: sigData })
+    }).catch(() => {});
+  }
+}
+
 // Sayfaları bul
 const pages = document.querySelectorAll('.sheet, .cover-sheet');
 
@@ -942,6 +1166,83 @@ function buildAufschiebendHtml(d) {
 </div><!-- /pdf-main -->
 
 <script>
+// ── GÖRÜNTÜLENDI PING ──────────────────────────────
+const ANGEBOT_NR = '${d.angebotNr||""}';
+const BASE = '${BASE_URL}';
+if (ANGEBOT_NR) {
+  fetch(BASE + '/seen/' + ANGEBOT_NR, { method: 'POST' }).catch(() => {});
+}
+
+// ── 30 GÜN GEÇERLİLİK KONTROLÜ ────────────────────
+const expiresAt = new Date('${new Date(Date.now()+30*24*60*60*1000).toISOString()}');
+if (new Date() > expiresAt) {
+  document.body.innerHTML = \`
+    <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;
+                background:#1a4a1a;font-family:Arial,sans-serif;text-align:center;color:#fff">
+      <div>
+        <div style="font-size:64px;margin-bottom:16px">⏰</div>
+        <div style="font-size:24px;font-weight:700;margin-bottom:8px">Angebot abgelaufen</div>
+        <div style="font-size:14px;opacity:.7">Dieses Angebot ist nicht mehr gültig.<br>
+        Bitte kontaktieren Sie uns für ein neues Angebot.</div>
+        <div style="margin-top:24px;font-size:13px;opacity:.6">+49 731 14395542 · info@volksenergieschwaben.de</div>
+      </div>
+    </div>\`;
+}
+
+// ── DİJİTAL İMZA ───────────────────────────────────
+const canvas = document.getElementById('sig-canvas');
+const ctx = canvas ? canvas.getContext('2d') : null;
+let drawing = false;
+let hasSig = false;
+
+function getPos(e, el) {
+  const r = el.getBoundingClientRect();
+  const scaleX = el.width / r.width;
+  const scaleY = el.height / r.height;
+  const src = e.touches ? e.touches[0] : e;
+  return { x: (src.clientX - r.left) * scaleX, y: (src.clientY - r.top) * scaleY };
+}
+
+if (canvas) {
+  ctx.strokeStyle = '#1a4a1a';
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  canvas.addEventListener('mousedown',  e => { drawing=true; const p=getPos(e,canvas); ctx.beginPath(); ctx.moveTo(p.x,p.y); });
+  canvas.addEventListener('mousemove',  e => { if(!drawing) return; const p=getPos(e,canvas); ctx.lineTo(p.x,p.y); ctx.stroke(); hasSig=true; });
+  canvas.addEventListener('mouseup',    () => { drawing=false; });
+  canvas.addEventListener('mouseleave', () => { drawing=false; });
+  canvas.addEventListener('touchstart', e => { e.preventDefault(); drawing=true; const p=getPos(e,canvas); ctx.beginPath(); ctx.moveTo(p.x,p.y); }, {passive:false});
+  canvas.addEventListener('touchmove',  e => { e.preventDefault(); if(!drawing) return; const p=getPos(e,canvas); ctx.lineTo(p.x,p.y); ctx.stroke(); hasSig=true; }, {passive:false});
+  canvas.addEventListener('touchend',   () => { drawing=false; });
+}
+
+function clearSig() {
+  if (!ctx) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  hasSig = false;
+  document.getElementById('sig-preview').innerHTML = '<span style="font-size:9px;color:#aaa">Unterschrift erscheint hier</span>';
+  document.getElementById('sig-status').style.display = 'none';
+}
+
+async function saveSig() {
+  if (!hasSig) { alert('Bitte zuerst unterschreiben!'); return; }
+  const sigData = canvas.toDataURL('image/png');
+  const preview = document.getElementById('sig-preview');
+  preview.innerHTML = '<img src="' + sigData + '" style="height:46px;object-fit:contain">';
+  document.getElementById('sig-status').style.display = 'inline';
+  document.getElementById('sig-btn').textContent = '✓ Gespeichert';
+  document.getElementById('sig-btn').style.background = '#2d7a2d';
+  if (ANGEBOT_NR) {
+    fetch(BASE + '/sign/' + ANGEBOT_NR, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signature: sigData })
+    }).catch(() => {});
+  }
+}
+
 // Sayfaları bul
 const pages = document.querySelectorAll('.sheet, .cover-sheet');
 
@@ -1039,6 +1340,83 @@ function buildVollmachtHtml(d) {
 </div><!-- /pdf-main -->
 
 <script>
+// ── GÖRÜNTÜLENDI PING ──────────────────────────────
+const ANGEBOT_NR = '${d.angebotNr||""}';
+const BASE = '${BASE_URL}';
+if (ANGEBOT_NR) {
+  fetch(BASE + '/seen/' + ANGEBOT_NR, { method: 'POST' }).catch(() => {});
+}
+
+// ── 30 GÜN GEÇERLİLİK KONTROLÜ ────────────────────
+const expiresAt = new Date('${new Date(Date.now()+30*24*60*60*1000).toISOString()}');
+if (new Date() > expiresAt) {
+  document.body.innerHTML = \`
+    <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;
+                background:#1a4a1a;font-family:Arial,sans-serif;text-align:center;color:#fff">
+      <div>
+        <div style="font-size:64px;margin-bottom:16px">⏰</div>
+        <div style="font-size:24px;font-weight:700;margin-bottom:8px">Angebot abgelaufen</div>
+        <div style="font-size:14px;opacity:.7">Dieses Angebot ist nicht mehr gültig.<br>
+        Bitte kontaktieren Sie uns für ein neues Angebot.</div>
+        <div style="margin-top:24px;font-size:13px;opacity:.6">+49 731 14395542 · info@volksenergieschwaben.de</div>
+      </div>
+    </div>\`;
+}
+
+// ── DİJİTAL İMZA ───────────────────────────────────
+const canvas = document.getElementById('sig-canvas');
+const ctx = canvas ? canvas.getContext('2d') : null;
+let drawing = false;
+let hasSig = false;
+
+function getPos(e, el) {
+  const r = el.getBoundingClientRect();
+  const scaleX = el.width / r.width;
+  const scaleY = el.height / r.height;
+  const src = e.touches ? e.touches[0] : e;
+  return { x: (src.clientX - r.left) * scaleX, y: (src.clientY - r.top) * scaleY };
+}
+
+if (canvas) {
+  ctx.strokeStyle = '#1a4a1a';
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  canvas.addEventListener('mousedown',  e => { drawing=true; const p=getPos(e,canvas); ctx.beginPath(); ctx.moveTo(p.x,p.y); });
+  canvas.addEventListener('mousemove',  e => { if(!drawing) return; const p=getPos(e,canvas); ctx.lineTo(p.x,p.y); ctx.stroke(); hasSig=true; });
+  canvas.addEventListener('mouseup',    () => { drawing=false; });
+  canvas.addEventListener('mouseleave', () => { drawing=false; });
+  canvas.addEventListener('touchstart', e => { e.preventDefault(); drawing=true; const p=getPos(e,canvas); ctx.beginPath(); ctx.moveTo(p.x,p.y); }, {passive:false});
+  canvas.addEventListener('touchmove',  e => { e.preventDefault(); if(!drawing) return; const p=getPos(e,canvas); ctx.lineTo(p.x,p.y); ctx.stroke(); hasSig=true; }, {passive:false});
+  canvas.addEventListener('touchend',   () => { drawing=false; });
+}
+
+function clearSig() {
+  if (!ctx) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  hasSig = false;
+  document.getElementById('sig-preview').innerHTML = '<span style="font-size:9px;color:#aaa">Unterschrift erscheint hier</span>';
+  document.getElementById('sig-status').style.display = 'none';
+}
+
+async function saveSig() {
+  if (!hasSig) { alert('Bitte zuerst unterschreiben!'); return; }
+  const sigData = canvas.toDataURL('image/png');
+  const preview = document.getElementById('sig-preview');
+  preview.innerHTML = '<img src="' + sigData + '" style="height:46px;object-fit:contain">';
+  document.getElementById('sig-status').style.display = 'inline';
+  document.getElementById('sig-btn').textContent = '✓ Gespeichert';
+  document.getElementById('sig-btn').style.background = '#2d7a2d';
+  if (ANGEBOT_NR) {
+    fetch(BASE + '/sign/' + ANGEBOT_NR, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signature: sigData })
+    }).catch(() => {});
+  }
+}
+
 // Sayfaları bul
 const pages = document.querySelectorAll('.sheet, .cover-sheet');
 
