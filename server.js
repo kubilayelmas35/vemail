@@ -453,14 +453,50 @@ table.zahl td:last-child{text-align:right;font-weight:700;color:#1a4a1a}
 .two-col>div{flex:1}
 .intro{font-size:11px;color:#444;line-height:1.85;margin-bottom:5mm}
 
-/* PRINT */
+/* PRINT - Sayfa kesme düzeltmesi */
 @media print{
-  html,body{background:#fff!important;margin:0;padding:0}
-  .print-btn{display:none!important}
-  .sheet,.cover-sheet{
-    width:100%!important;margin:0!important;
-    box-shadow:none!important;
+  html,body{
+    background:#fdf3e7!important;
+    margin:0;padding:0;
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact;
   }
+  .pdf-toolbar,.pdf-sidebar{display:none!important}
+  .pdf-main{
+    margin:0!important;padding:0!important;
+    display:block!important;
+    background:transparent!important;
+  }
+  .sheet,.cover-sheet{
+    width:210mm!important;
+    min-height:297mm!important;
+    height:297mm!important;
+    margin:0!important;
+    padding:14mm 16mm!important;
+    box-shadow:none!important;
+    page-break-after:always!important;
+    page-break-inside:avoid!important;
+    overflow:hidden!important;
+    display:block!important;
+  }
+  .cover-sheet{
+    padding:0!important;
+    background:#1a4a1a!important;
+    -webkit-print-color-adjust:exact!important;
+    print-color-adjust:exact!important;
+  }
+  /* Tablo, pozisyon satırları ortadan kesilmesin */
+  table{page-break-inside:avoid}
+  tr{page-break-inside:avoid}
+  .pos-row{page-break-inside:avoid}
+  .price-box{page-break-inside:avoid}
+  .sig-wrap{page-break-inside:avoid}
+  /* Boşluk bırakma */
+  * { orphans:3; widows:3; }
+}
+@page{
+  size:A4;
+  margin:0;
 }
 
 /* EKRAN - PDF Viewer */
@@ -613,6 +649,31 @@ table.zahl td:last-child{text-align:right;font-weight:700;color:#1a4a1a}
     <div class="cover-nr">
       <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
       Angebot ${d.angebotNr||'–'} &nbsp;&bull;&nbsp; ${d.date||new Date().toLocaleDateString('de-DE')}
+    </div>
+
+    <!-- ORTA ALAN - Büyük firma yazısı -->
+    <div style="margin-top:14mm;position:relative;z-index:2">
+      <div style="font-size:52px;font-weight:900;color:rgba(255,255,255,0.08);
+                  letter-spacing:-2px;line-height:1;margin-bottom:0;
+                  font-family:Lato,Arial,sans-serif">
+        Volksenergie<br>Schwaben
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;margin-top:6mm">
+        <div style="flex:1;height:1px;background:rgba(245,184,0,0.3)"></div>
+        <div style="font-size:13px;font-weight:700;color:rgba(245,184,0,0.7);
+                    letter-spacing:4px;text-transform:uppercase">
+          Unsere Region
+        </div>
+        <div style="flex:1;height:1px;background:rgba(245,184,0,0.3)"></div>
+      </div>
+      <div style="margin-top:5mm;text-align:right;padding-right:8mm">
+        <span style="font-size:22px;font-weight:900;color:rgba(245,184,0,0.5);
+                     letter-spacing:2px;text-transform:uppercase;
+                     transform:rotate(-4deg);display:inline-block;
+                     font-style:italic">
+          Unsere Energie
+        </span>
+      </div>
     </div>
   </div>
   <div class="cover-bottom">
