@@ -6,7 +6,12 @@ const https   = require('https');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET','POST','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','apikey'],
+}));
+app.options('*', cors());
 app.use(express.json({ limit: '4mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -48,7 +53,7 @@ app.get('/ping', (req, res) => res.json({ pong: true }));
 app.post('/save-angebot', async (req, res) => {
   try {
     const d = req.body;
-    await supabase('post', 'angebote', {
+    await sbQuery('post', 'angebote', {
       angebot_nr:        d.angebotNr,
       salutation:        d.salutation,
       first_name:        d.firstName,
@@ -91,12 +96,12 @@ app.post('/save-angebot', async (req, res) => {
 app.post('/seen/:angebotNr', async (req, res) => {
   try {
     const nr = req.params.angebotNr;
-    const rows = await supabase('get', 'angebote', null, 'angebot_nr=eq.' + nr + '&select=*');
+    const rows = await sbQuery('get', 'angebote', null, 'angebot_nr=eq.' + nr + '&select=*');
     if (!rows || rows.length === 0) return res.json({ ok: true });
     const row = rows[0];
 
     const isFirst = !row.first_seen_at;
-    await supabase('patch', 'angebote', {
+    await sbQuery('patch', 'angebote', {
       status:        row.status === 'gesendet' ? 'gesehen' : row.status,
       gezaehlt:      (row.gezaehlt || 0) + 1,
       first_seen_at: row.first_seen_at || new Date().toISOString(),
@@ -120,7 +125,7 @@ app.post('/sign/:angebotNr', async (req, res) => {
   try {
     const nr = req.params.angebotNr;
     const { signature } = req.body;
-    await supabase('patch', 'angebote', {
+    await sbQuery('patch', 'angebote', {
       status:            'unterschrieben',
       unterschrieben_at: new Date().toISOString(),
       signature_data:    signature,
@@ -134,7 +139,7 @@ app.post('/sign/:angebotNr', async (req, res) => {
 // Dashboard API — tüm angebotlar
 app.get('/api/angebote', async (req, res) => {
   try {
-    const rows = await supabase('get', 'angebote', null,
+    const rows = await sbQuery('get', 'angebote', null,
       'select=*&order=created_at.desc&limit=200');
     res.json(rows);
   } catch (e) {
