@@ -16,6 +16,23 @@ app.use(express.json({ limit: '4mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const BASE_URL        = process.env.RENDER_EXTERNAL_URL || 'https://vemail-jqp4.onrender.com';
+const SUPABASE_URL    = process.env.SUPABASE_URL || 'https://sgtbbrjyvsexidimhiug.supabase.co';
+const SUPABASE_KEY    = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNndGJicmp5dnNleGlkaW1oaXVnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTMwNjk5NSwiZXhwIjoyMDg2ODgyOTk1fQ.XKqfYGaoBbyp4CaHGaz1WB-_LD-psTaM10MdrsUYmLY';
+
+async function sbQuery(method, table, data, filter) {
+  let url = SUPABASE_URL + '/rest/v1/' + table;
+  if (filter) url += '?' + filter;
+  const res = await axios({
+    method, url, data,
+    headers: {
+      'apikey':        SUPABASE_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_KEY,
+      'Content-Type':  'application/json',
+      'Prefer':        'return=representation',
+    }
+  });
+  return res.data;
+}
 const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_KEY     || '';
 
 const FIRMA = {
