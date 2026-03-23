@@ -285,22 +285,42 @@ app.get('/api/angebote', async (req, res) => {
   }
 });
 
-// Bildirim emaili
+// Görüntülendi bildirim emaili (Brevo)
 async function sendNotificationEmail(nr, name, city) {
   try {
-    await axios.post('https://api.resend.com/emails', {
-      from: 'Volksenergie Schwaben <noreply@volksenergieschwaben.de>',
-      to:   'info@volksenergieschwaben.de',
-      subject: `📄 Angebot ${nr} wurde geöffnet — ${name}`,
-      html: `<p><strong>${name}</strong> aus <strong>${city}</strong> hat das Angebot <strong>${nr}</strong> gerade geöffnet.</p>
-             <p>Zeitpunkt: ${new Date().toLocaleString('de-DE')}</p>`
+    await axios.post('https://api.brevo.com/v3/smtp/email', {
+      sender:      { name: FIRMA.name, email: FIRMA.mail },
+      to:          [{ email: FIRMA.mail, name: FIRMA.gf }],
+      subject:     `👁 Angebot ${nr} wurde geöffnet — ${name}`,
+      htmlContent: `
+        <div style="font-family:Arial,sans-serif;padding:20px;background:#fdf3e7">
+          <div style="background:#1a4a1a;color:#fff;padding:12px 20px;border-radius:8px;margin-bottom:16px">
+            <strong>Angebot geöffnet!</strong>
+          </div>
+          <p><strong>${name}</strong> aus <strong>${city||'–'}</strong> hat das Angebot <strong>${nr}</strong> gerade geöffnet.</p>
+          <p style="color:#888;font-size:12px">Zeitpunkt: ${new Date().toLocaleString('de-DE')}</p>
+        </div>`,
     }, {
-      headers: { 'Authorization': 'Bearer ' + (process.env.RESEND_API_KEY||'') }
+      headers: { 'api-key': BREVO_KEY, 'Content-Type': 'application/json' }
     });
+    console.log('Notification sent for:', nr);
   } catch(e) {
     console.warn('Notification email failed:', e.message);
   }
 }
+
+// Status güncelle (Pipeline Kanban)
+app.patch('/api/angebote/:nr', async (req, res) => {
+  try {
+    const nr = req.params.nr;
+    const data = req.body;
+    await sbQuery('patch', 'angebote', data, 'angebot_nr=eq.' + nr);
+    res.json({ success: true });
+  } catch(e) {
+    console.error('Status update error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ── BROSCHÜRE ─────────────────────────────────────────────────
 app.get('/broschure', (req, res) => {
