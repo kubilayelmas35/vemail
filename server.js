@@ -64,7 +64,11 @@ const LOGO_URL = BASE_URL + '/images/logo.png';
 
 // ── HEALTH ────────────────────────────────────────────────────
 app.get('/',     (req, res) => res.json({ status: 'ok', service: 'Volksenergie Schwaben v5' }));
-app.get('/ping', (req, res) => res.json({ pong: true }));
+app.get('/ping', (req, res) => res.json({ 
+  pong: true,
+  brevo: BREVO_KEY ? 'set (' + BREVO_KEY.substring(0,12) + '...)' : 'NOT SET',
+  supabase: SUPABASE_KEY ? 'set' : 'NOT SET',
+}));
 
 // ── SUPABASE ENDPOINTS ───────────────────────────────────────
 // Angebot kaydet (http-functions.js'den çağrılır)
