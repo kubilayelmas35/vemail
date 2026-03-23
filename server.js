@@ -322,6 +322,44 @@ app.patch('/api/angebote/:nr', async (req, res) => {
   }
 });
 
+// Serbest mail gönderme (Mail sayfasından)
+app.post('/send-mail', async (req, res) => {
+  try {
+    const { to, subject, text, html } = req.body;
+    if (!to || !subject) return res.status(400).json({ error: 'to ve subject zorunlu' });
+
+    const htmlContent = html || `
+      <div style="font-family:Arial,sans-serif;padding:20px;background:#fdf3e7">
+        <div style="background:#1a4a1a;color:#fff;padding:12px 20px;border-radius:8px 8px 0 0">
+          <strong>${FIRMA.name}</strong>
+        </div>
+        <div style="background:#fff;border:1px solid #e8d5b0;border-top:none;border-radius:0 0 8px 8px;padding:20px">
+          <p style="white-space:pre-wrap;font-size:13px;color:#444;line-height:1.8">${text||''}</p>
+          <hr style="border:none;border-top:1px solid #e8d5b0;margin:16px 0">
+          <p style="font-size:11px;color:#888">
+            ${FIRMA.name} · ${FIRMA.adresse}<br>
+            Tel: ${FIRMA.tel} · ${FIRMA.mail}
+          </p>
+        </div>
+      </div>`;
+
+    await axios.post('https://api.brevo.com/v3/smtp/email', {
+      sender:      { name: FIRMA.name, email: FIRMA.mail },
+      to:          [{ email: to }],
+      replyTo:     { email: FIRMA.mail },
+      subject,
+      htmlContent,
+    }, {
+      headers: { 'api-key': BREVO_KEY, 'Content-Type': 'application/json' }
+    });
+
+    res.json({ success: true });
+  } catch(e) {
+    console.error('Send mail error:', e.response?.data || e.message);
+    res.status(500).json({ error: e.response?.data?.message || e.message });
+  }
+});
+
 // ── BROSCHÜRE ─────────────────────────────────────────────────
 app.get('/broschure', (req, res) => {
   const m = (req.query.module || '').toString();
