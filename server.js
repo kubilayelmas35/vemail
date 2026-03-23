@@ -103,12 +103,128 @@ app.post('/save-angebot', async (req, res) => {
       angebot_date:      new Date().toISOString().split('T')[0],
       expires_at:        new Date(Date.now() + 30*24*60*60*1000).toISOString(),
     });
+    // Brevo ile email gönder
+    await sendBrevoEmail(d);
+
     res.json({ success: true });
   } catch (e) {
     console.error('Supabase save error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
+
+// ── BREVO EMAIL ───────────────────────────────────────────────
+const BREVO_KEY = process.env.BREVO_KEY || '';
+
+async function sendBrevoEmail(d) {
+  try {
+    const brutto    = parseFloat(d.totalIncl) || 0;
+    const netto     = brutto / 1.19;
+    const foerder   = parseFloat(d.foerderSumme) || 0;
+    const eigen     = brutto - foerder;
+    const anr       = d.salutation === 'Frau' ? '' : 'r';
+    const modName   = d.moduleName || d.module || '–';
+    const datum     = d.date || new Date().toLocaleDateString('de-DE');
+
+    const html = `<!DOCTYPE html>
+<html lang="de"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f5f5f0;font-family:Arial,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f0;padding:24px 0">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#fdf3e7;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08)">
+  <tr><td style="background:#fdf3e7;padding:20px 32px 16px;border-bottom:3px solid #1a4a1a;text-align:center">
+    <img src="https://raw.githubusercontent.com/kubilayelmas35/vemail/refs/heads/main/public/images/logo.png"
+         style="height:64px;width:auto;background:#fdf3e7;border-radius:8px;padding:4px" alt="${FIRMA.name}">
+  </td></tr>
+  <tr><td style="background:#1a4a1a;padding:14px 32px">
+    <table width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td style="color:#fff;font-size:13px;font-weight:700">📄 Ihr Angebot ${d.angebotNr||''}</td>
+      <td style="text-align:right;color:#f5b800;font-size:12px;font-weight:700">${datum}</td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="padding:28px 32px">
+    <p style="font-size:14px;color:#1a4a1a;font-weight:700;margin:0 0 16px">
+      Sehr geehrte${anr} ${d.salutation} ${d.lastName},
+    </p>
+    <p style="font-size:13px;color:#444;line-height:1.8;margin:0 0 16px">
+      wir freuen uns, Ihnen heute Ihr persönliches Wärmepumpen-Angebot zusenden zu können.
+      Gerne stehen wir Ihnen jederzeit mit Rat und Tat zur Seite.
+    </p>
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f7f0;border:1px solid #c8e6c9;border-radius:8px;margin:0 0 20px">
+      <tr><td style="padding:16px 20px">
+        <table width="100%" cellpadding="4" cellspacing="0">
+          <tr>
+            <td style="font-size:11px;color:#888;text-transform:uppercase">Produkt</td>
+            <td style="font-size:13px;font-weight:700;color:#1a4a1a;text-align:right">${modName}</td>
+          </tr>
+          <tr>
+            <td style="font-size:11px;color:#888;text-transform:uppercase">Wohnfläche</td>
+            <td style="font-size:13px;font-weight:700;color:#1a4a1a;text-align:right">${d.wohnflaeche||'–'} m²</td>
+          </tr>
+          <tr style="border-top:1px solid #c8e6c9">
+            <td style="font-size:11px;color:#888;padding-top:8px">Gesamtbetrag Brutto</td>
+            <td style="font-size:16px;font-weight:700;color:#1a4a1a;text-align:right;padding-top:8px">${fmt(brutto)} €</td>
+          </tr>
+          ${foerder > 0 ? `
+          <tr>
+            <td style="font-size:11px;color:#888">Fördersumme KfW</td>
+            <td style="font-size:13px;font-weight:700;color:#f57f17;text-align:right">– ${fmt(foerder)} €</td>
+          </tr>
+          <tr>
+            <td style="font-size:11px;color:#888">Ihr Eigenanteil</td>
+            <td style="font-size:15px;font-weight:700;color:#2e7d32;text-align:right">${fmt(eigen)} €</td>
+          </tr>` : ''}
+        </table>
+      </td></tr>
+    </table>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px">
+      <tr>
+        <td style="padding:0 4px 8px 0" width="50%">
+          <a href="${d.angebotLink||'#'}" style="display:block;background:#1a4a1a;color:#fff;text-align:center;padding:12px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700">📄 Angebot ansehen</a>
+        </td>
+        <td style="padding:0 0 8px 4px" width="50%">
+          <a href="${d.aufschiebendeLink||'#'}" style="display:block;background:#fdf3e7;color:#1a4a1a;text-align:center;padding:12px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;border:1px solid #e8d5b0">📋 Bedingungen</a>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:0 4px 0 0" width="50%">
+          <a href="${d.vollmachtLink||'#'}" style="display:block;background:#fdf3e7;color:#1a4a1a;text-align:center;padding:12px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;border:1px solid #e8d5b0">✍️ Vollmacht</a>
+        </td>
+        <td style="padding:0 0 0 4px" width="50%">
+          <a href="${d.broschureLink||'#'}" style="display:block;background:#fdf3e7;color:#1a4a1a;text-align:center;padding:12px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;border:1px solid #e8d5b0">📖 Broschüre</a>
+        </td>
+      </tr>
+    </table>
+    <p style="font-size:12px;color:#888;line-height:1.7;margin:0">
+      Bei Fragen: <strong style="color:#1a4a1a">${FIRMA.tel}</strong> · <strong style="color:#1a4a1a">${FIRMA.mail}</strong><br>Mo–Fr 9:00–17:00 Uhr
+    </p>
+  </td></tr>
+  <tr><td style="background:#1a4a1a;padding:14px 32px;text-align:center">
+    <p style="font-size:10px;color:rgba(255,255,255,.5);margin:0;line-height:1.8">
+      ${FIRMA.name} · ${FIRMA.adresse}<br>
+      ${FIRMA.hrb} ${FIRMA.gericht} · GF: ${FIRMA.gf}
+    </p>
+  </td></tr>
+</table></td></tr></table>
+</body></html>`;
+
+    const res = await axios.post('https://api.brevo.com/v3/smtp/email', {
+      sender:      { name: FIRMA.name, email: FIRMA.mail },
+      to:          [{ email: d.emailAddress, name: (d.firstName||'') + ' ' + (d.lastName||'') }],
+      replyTo:     { email: FIRMA.mail },
+      subject:     `Ihr Angebot ${d.angebotNr||''} – ${modName} | ${FIRMA.name}`,
+      htmlContent: html,
+    }, {
+      headers: {
+        'api-key':      BREVO_KEY,
+        'Content-Type': 'application/json',
+      }
+    });
+    console.log('Brevo email sent:', res.status, d.emailAddress);
+  } catch (e) {
+    console.error('Brevo email error:', e.response?.data || e.message);
+  }
+}
 
 // Görüntülendi kaydı + bildirim
 app.post('/seen/:angebotNr', async (req, res) => {
