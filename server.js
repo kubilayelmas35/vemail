@@ -39,7 +39,7 @@ const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_KEY     || '';
 const FIRMA = {
   name:    'Volksenergie Schwaben GmbH',
   adresse: 'Neue Straße 95, 89073 Ulm',
-  tel:     '+49 731 14395542',
+  tel:     '+49 157 55753887',
   mail:    'info@volksenergieschwaben.de',
   web:     'volksenergieschwaben.de',
   hrb:     'HRB 750663',
@@ -206,7 +206,7 @@ async function sendBrevoEmail(d) {
   <tr><td style="background:#1a4a1a;padding:14px 32px;text-align:center">
     <p style="font-size:10px;color:rgba(255,255,255,.5);margin:0;line-height:1.8">
       ${FIRMA.name} · ${FIRMA.adresse}<br>
-      ${FIRMA.hrb} ${FIRMA.gericht} · GF: ${FIRMA.gf}
+      ${FIRMA.hrb} ${FIRMA.gericht}
     </p>
   </td></tr>
 </table></td></tr></table>
@@ -1057,7 +1057,6 @@ table.zahl td:last-child{text-align:right;font-weight:700;color:#1a4a1a}
 
   <div class="two-col">
     <div>
-      <div class="berater-box">Ihr Berater: ${FIRMA.gf}</div>
       <div style="font-size:10px;color:#5a5a4a;line-height:1.8">
         Tel: ${FIRMA.tel}<br>${FIRMA.mail}<br>Mo–Fr 9:00–17:00 Uhr
       </div>
@@ -1093,7 +1092,7 @@ table.zahl td:last-child{text-align:right;font-weight:700;color:#1a4a1a}
 
   <div class="footer">
     <strong>${FIRMA.name}</strong> &bull; ${FIRMA.adresse} &bull; Tel: ${FIRMA.tel}<br>
-    ${FIRMA.hrb} ${FIRMA.gericht} &bull; EUID: ${FIRMA.euid} &bull; GF: ${FIRMA.gf}
+    ${FIRMA.hrb} ${FIRMA.gericht} &bull; EUID: ${FIRMA.euid}
   </div>
 </div>
 
@@ -1157,7 +1156,7 @@ table.zahl td:last-child{text-align:right;font-weight:700;color:#1a4a1a}
   </table>
 
   <div class="footer">
-    <strong>${FIRMA.name}</strong> &bull; ${FIRMA.adresse} &bull; ${FIRMA.hrb} ${FIRMA.gericht} &bull; GF: ${FIRMA.gf}
+    <strong>${FIRMA.name}</strong> &bull; ${FIRMA.adresse} &bull; ${FIRMA.hrb} ${FIRMA.gericht}
   </div>
 </div>
 
@@ -1243,7 +1242,7 @@ table.zahl td:last-child{text-align:right;font-weight:700;color:#1a4a1a}
   </div>
 
   <div class="footer">
-    <strong>${FIRMA.name}</strong> &bull; ${FIRMA.adresse} &bull; ${FIRMA.hrb} ${FIRMA.gericht} &bull; GF: ${FIRMA.gf}
+    <strong>${FIRMA.name}</strong> &bull; ${FIRMA.adresse} &bull; ${FIRMA.hrb} ${FIRMA.gericht}
   </div>
 </div>
 
@@ -1268,7 +1267,7 @@ if (new Date() > expiresAt) {
         <div style="font-size:24px;font-weight:700;margin-bottom:8px">Angebot abgelaufen</div>
         <div style="font-size:14px;opacity:.7">Dieses Angebot ist nicht mehr gültig.<br>
         Bitte kontaktieren Sie uns für ein neues Angebot.</div>
-        <div style="margin-top:24px;font-size:13px;opacity:.6">+49 731 14395542 · info@volksenergieschwaben.de</div>
+        <div style="margin-top:24px;font-size:13px;opacity:.6">${FIRMA.tel} · info@volksenergieschwaben.de</div>
       </div>
     </div>\`;
 }
@@ -1424,7 +1423,7 @@ if (new Date() > expiresAt) {
         <div style="font-size:24px;font-weight:700;margin-bottom:8px">Angebot abgelaufen</div>
         <div style="font-size:14px;opacity:.7">Dieses Angebot ist nicht mehr gültig.<br>
         Bitte kontaktieren Sie uns für ein neues Angebot.</div>
-        <div style="margin-top:24px;font-size:13px;opacity:.6">+49 731 14395542 · info@volksenergieschwaben.de</div>
+        <div style="margin-top:24px;font-size:13px;opacity:.6">${FIRMA.tel} · info@volksenergieschwaben.de</div>
       </div>
     </div>\`;
 }
@@ -1598,7 +1597,7 @@ if (new Date() > expiresAt) {
         <div style="font-size:24px;font-weight:700;margin-bottom:8px">Angebot abgelaufen</div>
         <div style="font-size:14px;opacity:.7">Dieses Angebot ist nicht mehr gültig.<br>
         Bitte kontaktieren Sie uns für ein neues Angebot.</div>
-        <div style="margin-top:24px;font-size:13px;opacity:.6">+49 731 14395542 · info@volksenergieschwaben.de</div>
+        <div style="margin-top:24px;font-size:13px;opacity:.6">${FIRMA.tel} · info@volksenergieschwaben.de</div>
       </div>
     </div>\`;
 }
