@@ -134,6 +134,7 @@ app.post('/save-angebot', async (req, res) => {
       vollmacht_link:    d.vollmachtLink,
       broschure_link:    d.broschureLink,
       datenblatt_link:   d.datenblattLink,
+      payment_terms:     d.payments || [],
       status:            'gesendet',
       angebot_date:      new Date().toISOString().split('T')[0],
       expires_at:        new Date(Date.now() + 30*24*60*60*1000).toISOString(),
@@ -630,6 +631,28 @@ const AGREEMENT_LABELS = {
   '22043':'inkl. neuem separaten 3-Zählerfeld Zählerschrank',
 };
 
+function normalizePayments(d, brutto) {
+  const payments = Array.isArray(d.payments) ? d.payments.filter(p => p && p.pct > 0) : [];
+  if (payments.length) {
+    return payments.map(p => ({
+      label: p.label || p.key || 'Zahlung',
+      pct: parseFloat(p.pct) || 0,
+      amount: brutto * ((parseFloat(p.pct) || 0) / 100),
+    }));
+  }
+  return [
+    { label: 'Anzahlung', pct: 50, amount: brutto * 0.5 },
+    { label: 'nach vollständiger Materiallieferung', pct: 25, amount: brutto * 0.25 },
+    { label: 'nach abgeschlossener Montage und Inbetriebnahme', pct: 25, amount: brutto * 0.25 },
+  ];
+}
+
+function buildPaymentRowsHtml(d, brutto) {
+  return normalizePayments(d, brutto).map((p, i) =>
+    `<tr><td>${i + 1}. ${p.pct}% ${p.label}</td><td>${fmt(p.amount)} €</td></tr>`
+  ).join('');
+}
+
 function buildAngebotHtml(d, produktImg, satUrl) {
   const brutto   = parseFloat(d.totalIncl) || 0;
   const netto    = brutto / 1.19;
@@ -641,6 +664,7 @@ function buildAngebotHtml(d, produktImg, satUrl) {
   const agreementsHtml = (d.agreements || [])
     .map(v => `<tr><td class="pn">✓</td><td>${AGREEMENT_LABELS[v]||v}</td></tr>`)
     .join('');
+  const paymentHtml = buildPaymentRowsHtml(d, brutto);
 
   return `<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1220,8 +1244,7 @@ table.zahl td:last-child{text-align:right;font-weight:700;color:#1a4a1a}
 
   <div class="sec">Zahlungsmodalitäten</div>
   <table class="zahl">
-    <tr><td>1. Abschlag, 80%, bei Warenlieferung</td><td>${fmt(brutto*0.8)} €</td></tr>
-    <tr><td>2. Abschlag, 20%, bei Inbetriebnahme</td><td>${fmt(brutto*0.2)} €</td></tr>
+    ${paymentHtml}
   </table>
 
   <div class="price-box">
