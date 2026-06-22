@@ -51,7 +51,11 @@ const FIRMA = {
 const BROSCHURE_URLS = {
   viessmann_250: BASE_URL + '/pdfs/broschure-vitocal-250a.pdf',
   viessmann_150: BASE_URL + '/pdfs/broschure-vitocal-150a.pdf',
-  buderus:       BASE_URL + '/pdfs/broschure-buderus-wlw186i.pdf',
+  buderus_186:   BASE_URL + '/pdfs/broschure-buderus-wlw186i-einbaucheck.pdf',
+};
+
+const DATENBLATT_URLS = {
+  buderus_176: BASE_URL + '/pdfs/datenblatt-buderus-wlw176i.pdf',
 };
 
 const PRODUKT_IMAGES = {
@@ -61,6 +65,32 @@ const PRODUKT_IMAGES = {
 };
 
 const LOGO_URL = BASE_URL + '/images/logo.png';
+
+function getProductFamily(moduleName = '', moduleId = '') {
+  const m = `${moduleName} ${moduleId}`.toUpperCase();
+  if (m.includes('176') || m.includes('WLW176')) return 'buderus_176';
+  if (m.includes('186') || m.includes('WLW186') || m.includes('BUDERUS') || m.includes('WLW')) return 'buderus_186';
+  if (m.includes('150')) return 'viessmann_150';
+  if (m.includes('VITOCAL') || m.includes('VIESSMANN')) return 'viessmann_250';
+  return null;
+}
+
+function getProductDocLinks(moduleName = '', moduleId = '') {
+  const family = getProductFamily(moduleName, moduleId);
+  const links = { broschureLink: null, datenblattLink: null };
+  if (family === 'buderus_176') links.datenblattLink = DATENBLATT_URLS.buderus_176;
+  else if (family === 'buderus_186') links.broschureLink = BROSCHURE_URLS.buderus_186;
+  else if (family === 'viessmann_150') links.broschureLink = BROSCHURE_URLS.viessmann_150;
+  else if (family === 'viessmann_250') links.broschureLink = BROSCHURE_URLS.viessmann_250;
+  return links;
+}
+
+function enrichAngebotData(d = {}) {
+  const docs = getProductDocLinks(d.moduleName || d.module, d.module);
+  if (!d.broschureLink && docs.broschureLink) d.broschureLink = docs.broschureLink;
+  if (!d.datenblattLink && docs.datenblattLink) d.datenblattLink = docs.datenblattLink;
+  return d;
+}
 
 // ── HEALTH ────────────────────────────────────────────────────
 app.get('/',     (req, res) => res.json({ status: 'ok', service: 'Volksenergie Schwaben v5' }));
@@ -74,7 +104,7 @@ app.get('/ping', (req, res) => res.json({
 // Angebot kaydet (http-functions.js'den çağrılır)
 app.post('/save-angebot', async (req, res) => {
   try {
-    const d = req.body;
+    const d = enrichAngebotData({ ...req.body });
     await sbQuery('post', 'angebote', {
       angebot_nr:        d.angebotNr,
       salutation:        d.salutation,
@@ -103,6 +133,7 @@ app.post('/save-angebot', async (req, res) => {
       aufschiebende_link: d.aufschiebendeLink,
       vollmacht_link:    d.vollmachtLink,
       broschure_link:    d.broschureLink,
+      datenblatt_link:   d.datenblattLink,
       status:            'gesendet',
       angebot_date:      new Date().toISOString().split('T')[0],
       expires_at:        new Date(Date.now() + 30*24*60*60*1000).toISOString(),
@@ -122,6 +153,7 @@ const BREVO_KEY = process.env.BREVO_KEY || '';
 
 async function sendBrevoEmail(d) {
   try {
+    d = enrichAngebotData(d);
     const brutto    = parseFloat(d.totalIncl) || 0;
     const netto     = brutto / 1.19;
     const foerder   = parseFloat(d.foerderSumme) || 0;
@@ -195,9 +227,15 @@ async function sendBrevoEmail(d) {
           <a href="${d.vollmachtLink||'#'}" style="display:block;background:#fdf3e7;color:#1a4a1a;text-align:center;padding:12px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;border:1px solid #e8d5b0">✍️ Vollmacht</a>
         </td>
         <td style="padding:0 0 0 4px" width="50%">
-          <a href="${d.broschureLink||'#'}" style="display:block;background:#fdf3e7;color:#1a4a1a;text-align:center;padding:12px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;border:1px solid #e8d5b0">📖 Broschüre</a>
+          ${d.broschureLink ? `<a href="${d.broschureLink}" style="display:block;background:#fdf3e7;color:#1a4a1a;text-align:center;padding:12px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;border:1px solid #e8d5b0">📖 Broschüre</a>` : '&nbsp;'}
         </td>
       </tr>
+      ${d.datenblattLink ? `
+      <tr>
+        <td colspan="2" style="padding:8px 0 0">
+          <a href="${d.datenblattLink}" style="display:block;background:#fdf3e7;color:#1a4a1a;text-align:center;padding:12px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700;border:1px solid #e8d5b0">📎 Datenblatt</a>
+        </td>
+      </tr>` : ''}
     </table>
     <p style="font-size:12px;color:#888;line-height:1.7;margin:0">
       Bei Fragen: <strong style="color:#1a4a1a">${FIRMA.tel}</strong> · <strong style="color:#1a4a1a">${FIRMA.mail}</strong><br>Mo–Fr 9:00–17:00 Uhr
@@ -362,11 +400,15 @@ app.post('/send-mail', async (req, res) => {
 
 // ── BROSCHÜRE ─────────────────────────────────────────────────
 app.get('/broschure', (req, res) => {
-  const m = (req.query.module || '').toString();
-  let url = BROSCHURE_URLS.viessmann_250;
-  if (m.includes('150'))                               url = BROSCHURE_URLS.viessmann_150;
-  else if (m.includes('BUDERUS') || m.includes('WLW')) url = BROSCHURE_URLS.buderus;
+  const links = getProductDocLinks(req.query.module || '', req.query.module || '');
+  const url = links.broschureLink || BROSCHURE_URLS.viessmann_250;
   res.redirect(302, url);
+});
+
+app.get('/datenblatt', (req, res) => {
+  const links = getProductDocLinks(req.query.module || '', req.query.module || '');
+  if (!links.datenblattLink) return res.status(404).send('Datenblatt nicht gefunden');
+  res.redirect(302, links.datenblattLink);
 });
 
 // ── HTML SAYFASI — tarayıcıda açılır, print ile PDF ──────────
@@ -386,9 +428,12 @@ function serveHtml(req, res, type) {
   const d = parseQueryData(req);
   if (!d) return res.status(400).send('Veri eksik');
 
-  const isViessmann150 = (d.moduleName||d.module||'').includes('150');
-  const isBuderus      = (d.moduleName||d.module||'').includes('BUDERUS') || (d.moduleName||d.module||'').includes('WLW');
-  const produktImg     = isBuderus ? PRODUKT_IMAGES.buderus : isViessmann150 ? PRODUKT_IMAGES.viessmann_150 : PRODUKT_IMAGES.viessmann_250;
+  const family = getProductFamily(d.moduleName || d.module, d.module);
+  const produktImg = family === 'buderus_176' || family === 'buderus_186'
+    ? PRODUKT_IMAGES.buderus
+    : family === 'viessmann_150'
+      ? PRODUKT_IMAGES.viessmann_150
+      : PRODUKT_IMAGES.viessmann_250;
 
   const satUrl = GOOGLE_MAPS_KEY
     ? `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(d.street+' '+d.houseNumber+', '+d.zip+' '+d.city+', Deutschland')}&zoom=18&size=600x220&maptype=satellite&markers=color:red%7C${encodeURIComponent(d.street+' '+d.houseNumber+', '+d.zip+' '+d.city+', Deutschland')}&key=${GOOGLE_MAPS_KEY}`
